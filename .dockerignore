@@ -1,0 +1,11 @@
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+backend/data
+backend/static
+backend/.env
+frontend/test-results
+.git
+.vscode
+.claude

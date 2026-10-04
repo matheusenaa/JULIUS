@@ -1,0 +1,23 @@
+# Blueprint do Render (plano gratuito). Banco: PostgreSQL gratuito no Neon (https://neon.tech).
+# No painel do Render, informe DATABASE_URL (e a chave de IA, se quiser) como segredos.
+services:
+  - type: web
+    name: julius
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # postgresql+psycopg://usuario:senha@host/banco?sslmode=require
+      - key: ALLOW_REGISTRATION
+        value: "true" # mude para "false" depois de criar sua conta
+      - key: TIMEZONE
+        value: America/Sao_Paulo
+      - key: AI_PROVIDER
+        value: none # ou gemini
+      - key: GEMINI_API_KEY
+        sync: false

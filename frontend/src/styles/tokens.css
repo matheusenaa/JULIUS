@@ -1,0 +1,115 @@
+/*
+ * JULIUS — tokens de design
+ * Base preta e branca; verde = marca e dinheiro que entra; rosa = acento de ação
+ * (usado com parcimônia: botão principal, foco, destaque). Vermelho só para erro.
+ */
+:root {
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Fraunces Variable", Georgia, serif;
+
+  --bg: #f7f6f2;
+  --surface: #ffffff;
+  --surface-2: #f1efe9;
+  --ink: #111513;
+  --ink-2: #48514c;
+  --ink-3: #6f7873;
+  --line: #e3e0d8;
+  --line-strong: #cfcbc1;
+
+  --brand: #0b3d2c;
+  --brand-ink: #ffffff;
+  --green: #12784d;
+  --green-soft: #e2f1e8;
+  --pink: #d63b6c;
+  --pink-strong: #b8285a;
+  --pink-soft: #fce6ee;
+  --danger: #c0352b;
+  --danger-soft: #fbe9e7;
+  --warning: #9a5b00;
+  --warning-soft: #fdf1dc;
+  --info-soft: #e8eef3;
+
+  --income: var(--green);
+  --expense: var(--ink);
+  /* Séries de gráfico (validadas para daltonismo: ΔE 12,6 no claro, 13,8 no escuro) */
+  --chart-in: #0f6b45;
+  --chart-out: #e8628d;
+  --chart-line: #0b3d2c;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --shadow: 0 1px 2px rgb(17 21 19 / 6%), 0 4px 16px rgb(17 21 19 / 5%);
+  --shadow-lg: 0 12px 40px rgb(17 21 19 / 18%);
+  --focus: 0 0 0 3px rgb(214 59 108 / 35%);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --sidebar-w: 248px;
+  --bottom-nav-h: 64px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c0f0d;
+    --surface: #151a17;
+    --surface-2: #1c221f;
+    --ink: #eef1ee;
+    --ink-2: #b6bfba;
+    --ink-3: #8a948f;
+    --line: #29312d;
+    --line-strong: #3a443f;
+    --brand: #0e4a35;
+    --green: #4cc98d;
+    --green-soft: #15291f;
+    --pink: #ff6f9c;
+    --pink-strong: #ff8db0;
+    --pink-soft: #2e1820;
+    --danger: #ff7a6e;
+    --danger-soft: #2f1714;
+    --warning: #f0b45a;
+    --warning-soft: #2c2113;
+    --info-soft: #1a2228;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-lg: 0 12px 40px rgb(0 0 0 / 55%);
+    --chart-in: #3aa572;
+    --chart-out: #a92c60;
+    --chart-line: #4cc98d;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0c0f0d;
+  --surface: #151a17;
+  --surface-2: #1c221f;
+  --ink: #eef1ee;
+  --ink-2: #b6bfba;
+  --ink-3: #8a948f;
+  --line: #29312d;
+  --line-strong: #3a443f;
+  --brand: #0e4a35;
+  --green: #4cc98d;
+  --green-soft: #15291f;
+  --pink: #ff6f9c;
+  --pink-strong: #ff8db0;
+  --pink-soft: #2e1820;
+  --danger: #ff7a6e;
+  --danger-soft: #2f1714;
+  --warning: #f0b45a;
+  --warning-soft: #2c2113;
+  --info-soft: #1a2228;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 55%);
+  --chart-in: #3aa572;
+  --chart-out: #a92c60;
+  --chart-line: #4cc98d;
+  color-scheme: dark;
+}

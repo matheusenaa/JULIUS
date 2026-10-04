@@ -1,0 +1,36 @@
+# Segredos ??? nunca versionar
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Bancos locais e dados do usu??rio
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+backend/data/
+backups/
+
+# Node
+node_modules/
+frontend/dist/
+backend/static/
+playwright-report/
+test-results/
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+.claude/
+
+# Sa?das de teste
+frontend/test-results/
