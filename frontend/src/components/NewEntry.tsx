@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 
 import { api, ApiError, errorMessage } from "../lib/api";
 import { brl, dayLabel, FREQUENCY_LABEL, PAYMENT_LABEL, TYPE_LABEL } from "../lib/format";
+import { compressImage } from "../lib/image";
 import { createTransaction, useOnline } from "../lib/offline";
 import { invalidateFinance, useAccounts, useAiStatus, useCategories } from "../lib/queries";
 import type { Proposal, Transaction } from "../lib/types";
@@ -222,8 +223,8 @@ function ReceiptTab({ onDone }: { onDone: () => void }) {
     setError(null);
     setResult(null);
     const form = new FormData();
-    form.append("file", file);
     try {
+      form.append("file", await compressImage(file));
       const r = await api<{ attachment: { id: string }; proposal: Proposal | null; error: string | null }>("/api/receipts/scan", { form });
       setResult({ attachmentId: r.attachment.id, proposal: r.proposal });
       if (r.error) setError(r.error);

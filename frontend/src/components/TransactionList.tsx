@@ -1,7 +1,7 @@
-import { ArrowLeftRight, CloudUpload } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, CloudUpload } from "lucide-react";
 import { useState } from "react";
 
-import { dayLabel, PAYMENT_LABEL } from "../lib/format";
+import { dayLabel, isOverdue, PAYMENT_LABEL, STATUS_LABEL } from "../lib/format";
 import { useAccounts, useCategories } from "../lib/queries";
 import type { Transaction } from "../lib/types";
 import { TransactionForm } from "./TransactionForm";
@@ -39,7 +39,9 @@ export function TransactionRow({ tx, onOpen }: { tx: Transaction; onOpen?: (tx: 
         <CategoryIcon category={cat} parent={parent} />
       )}
       <div className="main-col">
-        <div className="title">{tx.description}</div>
+        <div className="title" style={tx.status === "canceled" ? { textDecoration: "line-through", opacity: 0.6 } : undefined}>
+          {tx.description}
+        </div>
         <div className="sub">{sub}</div>
       </div>
       <div style={{ textAlign: "right" }}>
@@ -50,7 +52,14 @@ export function TransactionRow({ tx, onOpen }: { tx: Transaction; onOpen?: (tx: 
               <CloudUpload size={11} /> fila
             </span>
           )}
-          {tx.status === "pending" && <span className="badge warn">previsto</span>}
+          {isOverdue(tx) ? (
+            <span className="badge danger">
+              <AlertTriangle size={11} /> atrasado
+            </span>
+          ) : tx.status !== "paid" ? (
+            <span className={`badge ${STATUS_LABEL[tx.status]?.tone ?? ""}`}>{STATUS_LABEL[tx.status]?.label.toLowerCase()}</span>
+          ) : null}
+          {tx.debt_installment && <span className="badge">dívida</span>}
           {tx.is_fixed && <span className="badge">fixa</span>}
           {tx.installment_total && (
             <span className="badge">

@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { api, ApiError, errorMessage } from "../lib/api";
 import { centsToInput, PAYMENT_LABEL, parseMoney, todayIso, TYPE_LABEL } from "../lib/format";
-import { createTransaction } from "../lib/offline";
+import { createTransaction, deleteTransaction, updateTransaction } from "../lib/offline";
 import { invalidateFinance, useAccounts, useCategories } from "../lib/queries";
 import type { Account, Category, PaymentMethod, Transaction, TransactionInput, TxStatus, TxType } from "../lib/types";
 import { useToast } from "./Toast";
@@ -129,24 +129,20 @@ export function TransactionForm({ initial, editing, source = "manual", onDone }:
     setFormError(null);
     try {
       if (editing) {
-        const tx = await api<Transaction>(`/api/transactions/${editing.id}`, {
-          method: "PATCH",
-          body: {
-            version: editing.version,
-            amount_cents: cents,
-            description: description.trim(),
-            occurred_on: date,
-            account_id: accountId,
-            ...(type === "transfer" ? { to_account_id: toAccountId } : { category_id: categoryId || null }),
-            payment_method: payment || null,
-            status,
-            is_fixed: isFixed,
-            notes: notes.trim() || null,
-          },
+        const result = await updateTransaction(editing, {
+          amount_cents: cents,
+          description: description.trim(),
+          occurred_on: date,
+          account_id: accountId,
+          ...(type === "transfer" ? { to_account_id: toAccountId } : { category_id: categoryId || null }),
+          payment_method: payment || null,
+          status,
+          is_fixed: isFixed,
+          notes: notes.trim() || null,
         });
         invalidateFinance();
-        toast("Alterações salvas.");
-        onDone(tx);
+        toast(result.queued ? "Sem internet: alteração salva no aparelho e enviada quando a conexão voltar." : "Alterações salvas.");
+        onDone(result.tx);
       } else {
         const body: TransactionInput = {
           id: initial?.id,
@@ -177,11 +173,7 @@ export function TransactionForm({ initial, editing, source = "manual", onDone }:
       } else if (err instanceof ApiError && err.details && err.code === "validation") {
         setFormError(errorMessage(err));
       } else {
-        setFormError(
-          err instanceof ApiError && err.offline
-            ? "Não foi possível salvar a alteração sem internet. Tente quando a conexão voltar."
-            : errorMessage(err),
-        );
+        setFormError(errorMessage(err));
       }
     } finally {
       setSaving(false);
@@ -192,11 +184,11 @@ export function TransactionForm({ initial, editing, source = "manual", onDone }:
     if (!editing) return;
     setSaving(true);
     try {
-      await api(`/api/transactions/${editing.id}?scope=${scope}`, { method: "DELETE" });
+      const result = await deleteTransaction(editing, scope);
       invalidateFinance();
-      toast("Lançamento excluído.", {
+      toast(result.queued ? "Sem internet: a exclusão será enviada quando a conexão voltar." : "Lançamento excluído.", {
         action:
-          scope === "one"
+          scope === "one" && !result.queued
             ? {
                 label: "Desfazer",
                 run: () =>
@@ -307,6 +299,16 @@ export function TransactionForm({ initial, editing, source = "manual", onDone }:
         <button type="button" className="chip" aria-pressed={status === "pending"} onClick={() => setStatus("pending")}>
           Previsto
         </button>
+        <button type="button" className="chip" aria-pressed={status === "confirmed"} onClick={() => setStatus("confirmed")}
+          title="Ex.: boleto agendado, valor já certo">
+          Confirmado
+        </button>
+        {editing && (
+          <button type="button" className="chip" aria-pressed={status === "canceled"} onClick={() => setStatus("canceled")}
+            title="Não vai mais acontecer; fica no histórico mas não entra em saldos">
+            Cancelado
+          </button>
+        )}
         {type !== "transfer" && (
           <label className="check" style={{ marginLeft: 4 }}>
             <input type="checkbox" checked={isFixed} onChange={(e) => setIsFixed(e.target.checked)} />

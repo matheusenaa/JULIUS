@@ -182,6 +182,19 @@ class Transaction(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
         Index("ix_transactions_account", "account_id"),
         Index("ix_transactions_to_account", "to_account_id"),
         Index("ix_transactions_debt", "debt_id"),
+        # Índice de cobertura para saldos/totais: o banco responde sem ler a tabela
+        # (medido: 20 mil lançamentos, saldo de 584 ms → poucos ms)
+        Index(
+            "ix_transactions_ledger",
+            "user_id",
+            "occurred_on",
+            "status",
+            "type",
+            "account_id",
+            "to_account_id",
+            "amount_cents",
+            "deleted_at",
+        ),
     )
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))

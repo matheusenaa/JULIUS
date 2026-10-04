@@ -12,7 +12,7 @@ Entram (apenas o que afeta o dinheiro disponível — contas fora do cartão):
 Itens atrasados entram na projeção "hoje": ainda precisam acontecer.
 """
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, timedelta
 
 from sqlalchemy import or_, select
@@ -23,6 +23,7 @@ from app.models.finance import OPEN_STATUSES
 from app.services import debts as debts_svc
 from app.services import ledger
 from app.services.recurrences import pending_occurrences
+from app.services.reqcache import cached
 
 LOOKBACK_DAYS = 62  # até quando um item atrasado continua aparecendo
 
@@ -55,6 +56,14 @@ def _status(base: str, when: date, today: date) -> str:
 
 
 def events(db: Session, user_id: str, today: date, until: date) -> list[Event]:
+    # Cópias: timeline() escreve balance_after em cada evento
+    return [
+        replace(e)
+        for e in cached(db, ("events", user_id, today, until), lambda: _events(db, user_id, today, until))
+    ]
+
+
+def _events(db: Session, user_id: str, today: date, until: date) -> list[Event]:
     cash = ledger.cash_accounts(db, user_id)
     card_ids = {c.id for c in ledger.cards(db, user_id)}
     out: list[Event] = []

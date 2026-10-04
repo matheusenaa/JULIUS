@@ -32,3 +32,36 @@
 ## Ordem de execução
 
 Migration → serviços (status, linha do tempo, dívidas, documentos, agente, sincronização) → APIs → frontend (Visão geral, Futuros, Dívidas, Documentos, agente, central de sincronização, onboarding, ajustes) → identidade → desktop → testes → desempenho → documentação.
+
+## Resultado
+
+| Item | Status | Verificação |
+|---|---|---|
+| Migrations 0003 (status, dívidas, versões, documentos, ações da IA, sincronização) e 0004 (índice) | ✅ | upgrade → downgrade → upgrade em cópia do banco real, dados preservados |
+| Linha do tempo / projeção / calendário / alertas | ✅ | exemplo do briefing (2.500 → 3.350) testado evento a evento |
+| Status previsto/confirmado/pago/cancelado, atrasado calculado | ✅ | testes de saldo, listas e projeção |
+| Salário previsto → recebido | ✅ | não entra como receita antes de confirmado |
+| Dívidas (restante, parcelas, próxima, quitada) | ✅ | Notebook 12×250 com 5 pagas → R$ 1.750 |
+| Visão geral (gráficos, calendário, dívidas, parcelamentos) | ✅ | E2E desktop e celular, revisão visual |
+| Documentos: PDF/boleto sem IA, foto com IA, revisão e confirmação | ✅ | boleto FEBRABAN com dígitos verificadores; uploads maliciosos/interrompidos rejeitados |
+| Agente: ferramentas controladas, escrita só com confirmação, falha da IA cai para regras | ✅ | testes com IA simulada, inclusive acesso a dados de outro usuário (bloqueado) |
+| Sincronização local ↔ online com conflitos | ✅ | dois bancos reais em teste: união de categorias, ida e volta, conflito, exclusão, queda de rede |
+| Fila offline com edições/exclusões e conflito no celular | ✅ | testes unitários + E2E |
+| Desktop | ✅ | `JULIUS.exe` gerado (58 MB) e testado: cria banco, migra, serve o app |
+| Desempenho | ✅ | 20 mil lançamentos: Visão geral 12,5 s → 0,77 s (índice de cobertura + cache por requisição) |
+| Onboarding, ajustes (moeda, notificações, IA, privacidade, exclusão de conta) | ✅ | E2E do onboarding |
+| Importação OFX/CSV, exportação Excel/PDF | ✅ | testes |
+
+### Bugs reais encontrados pelos testes e corrigidos
+- Sincronização sobrescrevia em silêncio uma edição local feita logo após um sincronismo (marca interna não era limpa).
+- Sem internet, a sincronização estourava com erro cru em vez de "sem conexão".
+- A leitura da linha digitável juntava o ano da linha anterior do PDF.
+- Migration no SQLite era desfeita sem aviso (transação implícita aberta por PRAGMA).
+- "Preencher manualmente" não fazia nada quando o documento não era legível.
+
+### Pendências honestas
+- Gemini real: implementado pelo endpoint oficial compatível com OpenAI; validar com chave real.
+- PostgreSQL/Docker ainda não executados nesta máquina.
+- Notificações: aviso do navegador quando o app abre; push com o app fechado exige um serviço agendado (fica para o deploy).
+- Anexos (arquivos) não entram na sincronização entre dispositivos — só os dados.
+- Tauri (ícone na bandeja, atualização automática) fica como evolução do executável atual.

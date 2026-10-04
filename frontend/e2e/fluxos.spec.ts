@@ -1,22 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-function trackConsole(page: Page) {
-  const errors: string[] = [];
-  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-  page.on("pageerror", (e) => errors.push(e.message));
-  return errors;
-}
-
-async function register(page: Page) {
-  const email = `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@teste.com`;
-  await page.goto("/criar-conta");
-  await page.getByLabel("Seu nome").fill("Ana Teste");
-  await page.getByLabel("E-mail").fill(email);
-  await page.getByLabel("Senha").fill("senha-forte-123");
-  await page.getByRole("button", { name: "Criar conta" }).click();
-  await expect(page.getByRole("heading", { name: "Olá, Ana" })).toBeVisible();
-  return email;
-}
+import { register, trackConsole } from "./helpers";
 
 test("cadastro, quick input, saldo e histórico", async ({ page }) => {
   const errors = trackConsole(page);

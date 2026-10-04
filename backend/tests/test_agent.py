@@ -28,8 +28,14 @@ class ScriptedAgent:
         if isinstance(step, str):
             return ChatReply(text=step, tool_calls=[], raw_message={"role": "assistant", "content": step})
         calls = [{"id": f"c{i}", "name": n, "arguments": a} for i, (n, a) in enumerate(step)]
-        raw = {"role": "assistant", "content": None, "tool_calls": [
-            {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": "{}"}} for c in calls]}
+        raw = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": "{}"}}
+                for c in calls
+            ],
+        }
         return ChatReply(text=None, tool_calls=calls, raw_message=raw)
 
 
@@ -53,10 +59,20 @@ def ask(api, q, conv=None):
 
 
 def seed(api, ids):
-    acc = api.post("/api/accounts", {"name": "Banco", "kind": "checking", "initial_balance_cents": 100000}).json()
-    api.post("/api/transactions", {"type": "expense", "account_id": acc["id"], "amount_cents": 50000,
-                                   "occurred_on": TODAY.isoformat(), "description": "Mercado grande",
-                                   "category_id": ids["cats"]["Mercado"]})
+    acc = api.post(
+        "/api/accounts", {"name": "Banco", "kind": "checking", "initial_balance_cents": 100000}
+    ).json()
+    api.post(
+        "/api/transactions",
+        {
+            "type": "expense",
+            "account_id": acc["id"],
+            "amount_cents": 50000,
+            "occurred_on": TODAY.isoformat(),
+            "description": "Mercado grande",
+            "category_id": ids["cats"]["Mercado"],
+        },
+    )
     return acc
 
 
@@ -71,8 +87,17 @@ def test_agent_reads_with_tools_and_answers(api, ids, agent):
 
 def test_agent_write_requires_confirmation(api, ids, agent):
     acc = seed(api, ids)
-    agent([[("create_transaction", {"type": "expense", "amount": 32.5, "description": "Farmácia",
-                                    "category": "Farmácia"})], "Preparei o lançamento; confirme no botão."])
+    agent(
+        [
+            [
+                (
+                    "create_transaction",
+                    {"type": "expense", "amount": 32.5, "description": "Farmácia", "category": "Farmácia"},
+                )
+            ],
+            "Preparei o lançamento; confirme no botão.",
+        ]
+    )
     r = ask(api, "registre por favor uma compra na farmácia de 32,50")
     assert len(r["actions"]) == 1 and r["actions"][0]["status"] == "pending"
     before = api.get("/api/transactions", params={"account_id": acc["id"]}).json()["total"]
@@ -99,8 +124,13 @@ def test_agent_delete_can_be_rejected(api, ids, agent):
 
 def test_agent_invalid_tool_args_return_error_to_model(api, ids, agent):
     seed(api, ids)
-    fake = agent([[("create_transaction", {"type": "expense", "amount": -5, "description": "x"})],
-                  [("get_transactions", {"category": "Inexistente"})], "Não consegui."])
+    fake = agent(
+        [
+            [("create_transaction", {"type": "expense", "amount": -5, "description": "x"})],
+            [("get_transactions", {"category": "Inexistente"})],
+            "Não consegui.",
+        ]
+    )
     r = ask(api, "faça algo estranho")
     assert r["actions"] == []
     assert "error" in fake.seen[1][-1]["content"] and "Inexistente" in fake.seen[2][-1]["content"]
@@ -110,7 +140,9 @@ def test_agent_cannot_touch_other_users_data(api, anon, ids, agent):
     seed(api, ids)
     tx_id = api.get("/api/transactions").json()["items"][0]["id"]
     api.post("/api/auth/logout")
-    anon.post("/api/auth/register", {"email": "outro-agent@t.com", "name": "B", "password": "senha-forte-123"})
+    anon.post(
+        "/api/auth/register", {"email": "outro-agent@t.com", "name": "B", "password": "senha-forte-123"}
+    )
     fake = agent([[("delete_transaction", {"id": tx_id})], "ok"])
     r = ask(anon, "dê um sumiço naquele registro")
     assert r["actions"] == [] and "não encontrado" in fake.seen[1][-1]["content"].lower()
@@ -141,15 +173,39 @@ def test_rules_delete_with_confirmation(api, ids):
 
 def test_rules_new_questions(api, ids):
     acc = seed(api, ids)
-    api.post("/api/transactions", {"type": "expense", "account_id": acc["id"], "amount_cents": 20000,
-                                   "occurred_on": (TODAY + timedelta(days=2)).isoformat(), "description": "Luz",
-                                   "status": "pending"})
-    api.post("/api/transactions", {"type": "income", "account_id": acc["id"], "amount_cents": 300000,
-                                   "occurred_on": (TODAY + timedelta(days=3)).isoformat(), "description": "Salário",
-                                   "status": "pending"})
-    api.post("/api/debts", {"name": "Notebook", "original_cents": 300000, "installments_total": 12,
-                            "installment_cents": 25000, "installments_paid_before": 5,
-                            "first_due_date": TODAY.isoformat()})
+    api.post(
+        "/api/transactions",
+        {
+            "type": "expense",
+            "account_id": acc["id"],
+            "amount_cents": 20000,
+            "occurred_on": (TODAY + timedelta(days=2)).isoformat(),
+            "description": "Luz",
+            "status": "pending",
+        },
+    )
+    api.post(
+        "/api/transactions",
+        {
+            "type": "income",
+            "account_id": acc["id"],
+            "amount_cents": 300000,
+            "occurred_on": (TODAY + timedelta(days=3)).isoformat(),
+            "description": "Salário",
+            "status": "pending",
+        },
+    )
+    api.post(
+        "/api/debts",
+        {
+            "name": "Notebook",
+            "original_cents": 300000,
+            "installments_total": 12,
+            "installment_cents": 25000,
+            "installments_paid_before": 5,
+            "first_due_date": TODAY.isoformat(),
+        },
+    )
     r = ask(api, "Quanto vou gastar até o final do mês?")
     assert r["intent"] == "month_spend" and "R$ 500,00" in r["answer"]
     r = ask(api, "Quanto vou receber?")

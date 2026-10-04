@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Account, Transaction
 from app.services.cards import due_date
+from app.services.reqcache import cached
 
 
 def _active_tx(user_id: str):
@@ -57,6 +58,11 @@ def account_balances(
     db: Session, user_id: str, as_of: date | None = None, include_pending: bool = False
 ) -> dict[str, int]:
     """Saldo por conta: inicial + receitas − despesas − transferências enviadas + recebidas."""
+    key = ("balances", user_id, as_of, include_pending)
+    return dict(cached(db, key, lambda: _account_balances(db, user_id, as_of, include_pending)))
+
+
+def _account_balances(db: Session, user_id: str, as_of: date | None, include_pending: bool) -> dict[str, int]:
     accounts = db.scalars(
         select(Account).where(Account.user_id == user_id, Account.deleted_at.is_(None))
     ).all()
@@ -99,6 +105,10 @@ def card_amount_due_by(db: Session, card: Account, until: date) -> int:
 
 def card_invoices(db: Session, card: Account) -> list[dict]:
     """Faturas do cartão, com total e situação (paga / aberta / futura)."""
+    return [dict(i) for i in cached(db, ("invoices", card.id), lambda: _card_invoices(db, card))]
+
+
+def _card_invoices(db: Session, card: Account) -> list[dict]:
     rows = db.execute(
         select(
             Transaction.invoice_month,

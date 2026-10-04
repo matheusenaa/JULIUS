@@ -1,9 +1,14 @@
-const brlFmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+let moneyFmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+/** Moeda escolhida pelo usuário (só exibição; o JULIUS não converte moedas). */
+export function setCurrency(code: string | undefined) {
+  moneyFmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: code || "BRL" });
+}
 
 /** Centavos → "R$ 1.234,56". Exibição apenas; nenhum cálculo financeiro é feito no cliente. */
 export function brl(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return "—";
-  return brlFmt.format(cents / 100);
+  return moneyFmt.format(cents / 100);
 }
 
 export function signedBrl(cents: number, type: string): string {
@@ -91,3 +96,36 @@ export const ACCOUNT_KIND_LABEL: Record<string, string> = {
 };
 
 export const FREQUENCY_LABEL = { weekly: "Semanal", monthly: "Mensal", yearly: "Anual" } as const;
+
+/** Status com rótulo E ícone/estilo (nunca só cor). "Atrasado" é calculado pelo servidor. */
+export const STATUS_LABEL: Record<string, { label: string; tone: "" | "green" | "warn" | "danger" | "pink" }> = {
+  pending: { label: "Previsto", tone: "" },
+  confirmed: { label: "Confirmado", tone: "green" },
+  paid: { label: "Pago", tone: "green" },
+  canceled: { label: "Cancelado", tone: "" },
+  overdue: { label: "Atrasado", tone: "danger" },
+  scheduled: { label: "Agendado", tone: "" },
+};
+
+export function isOverdue(tx: { status: string; occurred_on: string }): boolean {
+  return (tx.status === "pending" || tx.status === "confirmed") && tx.occurred_on < todayIso();
+}
+
+export const DEBT_KIND_LABEL: Record<string, string> = {
+  loan: "Empréstimo",
+  financing: "Financiamento",
+  purchase: "Compra parcelada",
+  card: "Cartão",
+  informal: "Pessoa / informal",
+  other: "Outra",
+};
+
+export const DOC_KIND_LABEL: Record<string, string> = {
+  bill: "Conta / boleto",
+  receipt: "Comprovante",
+  invoice: "Nota fiscal",
+  pix: "Pix",
+  statement: "Extrato",
+  contract: "Contrato",
+  other: "Outro",
+};

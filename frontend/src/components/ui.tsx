@@ -23,23 +23,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { Link } from "react-router";
 
 import { brl, signedBrl } from "../lib/format";
 import type { Category } from "../lib/types";
 
-export function Logo({ to = "/" }: { to?: string }) {
-  return (
-    <Link to={to} className="logo" aria-label="JULIUS — início">
-      <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true">
-        <rect width="64" height="64" rx="15" fill="#0B3D2C" />
-        <path d="M35 15v23a10.5 10.5 0 0 1-21 0" fill="none" stroke="#fff" strokeWidth="7.5" strokeLinecap="round" />
-        <circle cx="47.5" cy="15.5" r="5.5" fill="#F0507E" />
-      </svg>
-      <span className="wordmark">JULIUS</span>
-    </Link>
-  );
-}
+export { Logo } from "./Brand";
 
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "accent" | "ghost" | "danger";

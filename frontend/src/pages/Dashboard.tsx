@@ -8,7 +8,7 @@ import type { FormInitial } from "../components/TransactionForm";
 import { TransactionList } from "../components/TransactionList";
 import { Amount, Button, EmptyState, ErrorState, Progress, Skeleton } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
-import { brl, monthLabel, shortDate } from "../lib/format";
+import { brl, monthLabel, shortDate, todayIso } from "../lib/format";
 import { invalidateFinance, useDashboard, useMe } from "../lib/queries";
 import type { Dashboard as D, UpcomingItem } from "../lib/types";
 
@@ -22,9 +22,12 @@ function Upcoming({ items }: { items: UpcomingItem[] }) {
     try {
       if (item.kind === "recurrence") {
         await api(`/api/recurrences/${item.id}/confirm`, { body: { occurrence_date: item.date } });
-      } else if (item.kind === "pending") {
-        const tx = await api<{ version: number }>(`/api/transactions/${item.id}`);
-        await api(`/api/transactions/${item.id}`, { method: "PATCH", body: { version: tx.version, status: "paid" } });
+      } else if (item.kind === "transaction") {
+        const version = (item.extra?.version as number | undefined) ?? (await api<{ version: number }>(`/api/transactions/${item.id}`)).version;
+        const when = item.date < todayIso() ? todayIso() : item.date;
+        await api(`/api/transactions/${item.id}`, { method: "PATCH", body: { version, status: "paid", occurred_on: when } });
+      } else if (item.kind === "debt") {
+        await api(`/api/debts/${item.id}/pay`, { body: {} });
       }
       invalidateFinance();
       toast(`${item.description} marcado como ${item.type === "income" ? "recebido" : "pago"}.`);

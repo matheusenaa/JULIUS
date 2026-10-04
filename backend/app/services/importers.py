@@ -54,6 +54,7 @@ def parse_ofx(data: bytes) -> list[Row]:
     for block in re.findall(
         r"<STMTTRN>(.*?)(?:</STMTTRN>|(?=<STMTTRN>)|(?=</BANKTRANLIST>))", text, re.S | re.I
     ):
+
         def tag(name: str, block: str = block) -> str | None:
             return _ofx_tag(block, name)
 

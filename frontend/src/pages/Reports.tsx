@@ -125,8 +125,8 @@ function FlowChart({ r }: { r: Report }) {
               />
               <YAxis tickFormatter={axisMoney} tick={{ fill: "var(--ink-3)", fontSize: 12 }} axisLine={false} tickLine={false} width={48} />
               <Tooltip content={<ChartTooltip period={r.period} />} cursor={{ fill: "var(--surface-2)" }} />
-              <Bar dataKey="income" fill="var(--chart-in)" radius={[4, 4, 0, 0]} maxBarSize={22} />
-              <Bar dataKey="expense" fill="var(--chart-out)" radius={[4, 4, 0, 0]} maxBarSize={22} />
+              <Bar isAnimationActive={false} dataKey="income" fill="var(--chart-in)" radius={[4, 4, 0, 0]} maxBarSize={22} />
+              <Bar isAnimationActive={false} dataKey="expense" fill="var(--chart-out)" radius={[4, 4, 0, 0]} maxBarSize={22} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -170,7 +170,7 @@ function ForecastChart({ r }: { r: Report }) {
               labelFormatter={(l) => monthLabel(String(l))}
               contentStyle={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12 }}
             />
-            <Line type="monotone" dataKey="balance_cents" stroke="var(--chart-line)" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4 }} activeDot={{ r: 6 }} />
+            <Line isAnimationActive={false} type="monotone" dataKey="balance_cents" stroke="var(--chart-line)" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 4 }} activeDot={{ r: 6 }} />
           </LineChart>
         </ResponsiveContainer>
       </div>

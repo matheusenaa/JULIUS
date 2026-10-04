@@ -9,7 +9,7 @@ import { errorMessage } from "../lib/api";
 import { brl, monthLabel, PAYMENT_LABEL, parseMoney } from "../lib/format";
 import { useOutbox } from "../lib/offline";
 import { useAccounts, useCategories, useTransactions, type TxFilters } from "../lib/queries";
-import type { Transaction } from "../lib/types";
+import type { Transaction, TransactionInput } from "../lib/types";
 
 function monthBounds(ym: string) {
   const [y, m] = ym.split("-").map(Number);
@@ -62,26 +62,31 @@ export default function Transactions() {
 
   const queued: Transaction[] = useMemo(
     () =>
-      outbox.map((o) => ({
-        ...o.body,
-        id: o.id,
-        status: o.body.status ?? "paid",
-        to_account_id: o.body.to_account_id ?? null,
-        notes: o.body.notes ?? null,
-        category_id: o.body.category_id ?? null,
-        payment_method: o.body.payment_method ?? null,
-        is_fixed: !!o.body.is_fixed,
-        source: o.body.source ?? "manual",
-        invoice_month: null,
-        recurrence_id: null,
-        installment_plan_id: null,
-        installment_number: null,
-        installment_total: o.body.installments && o.body.installments > 1 ? o.body.installments : null,
-        version: 0,
-        created_at: "",
-        updated_at: "",
-        _queued: true,
-      })),
+      outbox
+        .filter((o) => o.op === "create") // edições/exclusões pendentes aparecem em Ajustes → Sincronização
+        .map((o) => {
+          const b = o.body as TransactionInput;
+          return {
+            ...b,
+            id: o.entityId,
+            status: b.status ?? "paid",
+            to_account_id: b.to_account_id ?? null,
+            notes: b.notes ?? null,
+            category_id: b.category_id ?? null,
+            payment_method: b.payment_method ?? null,
+            is_fixed: !!b.is_fixed,
+            source: b.source ?? "manual",
+            invoice_month: null,
+            recurrence_id: null,
+            installment_plan_id: null,
+            installment_number: null,
+            installment_total: b.installments && b.installments > 1 ? b.installments : null,
+            version: 0,
+            created_at: "",
+            updated_at: "",
+            _queued: true,
+          };
+        }),
     [outbox],
   );
 

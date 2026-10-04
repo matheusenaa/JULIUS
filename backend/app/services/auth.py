@@ -47,7 +47,9 @@ def register(db: Session, email: str, name: str, password: str) -> User:
     email = email.strip().lower()
     if db.scalar(select(User.id).where(User.email == email)):
         raise Conflict("Já existe uma conta com este e-mail.", code="email_taken")
-    user = User(email=email, name=name.strip(), password_hash=hash_password(password), settings={})
+    user = User(
+        email=email, name=name.strip(), password_hash=hash_password(password), settings={"onboarded": False}
+    )
     db.add(user)
     db.flush()
     create_default_categories(db, user.id)

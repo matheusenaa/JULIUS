@@ -19,8 +19,12 @@ def account(api):
 
 
 def preview(api, content, name, acc_id):
-    r = api.c.post("/api/import/statement/preview", files={"file": (name, content)}, data={"account_id": acc_id},
-                   headers=api._h())
+    r = api.c.post(
+        "/api/import/statement/preview",
+        files={"file": (name, content)},
+        data={"account_id": acc_id},
+        headers=api._h(),
+    )
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -30,10 +34,15 @@ def test_ofx_import_preview_confirm_and_no_duplicates(api, ids):
     p = preview(api, OFX, "extrato.ofx", acc["id"])
     assert p["format"] == "ofx" and len(p["items"]) == 3 and p["duplicates"] == 0
     by_desc = {i["description"]: i for i in p["items"]}
-    assert by_desc["SUPERMERCADO EXTRA"]["amount_cents"] == 4590 and by_desc["SUPERMERCADO EXTRA"]["type"] == "expense"
+    assert (
+        by_desc["SUPERMERCADO EXTRA"]["amount_cents"] == 4590
+        and by_desc["SUPERMERCADO EXTRA"]["type"] == "expense"
+    )
     assert by_desc["SALARIO EMPRESA"]["type"] == "income"
     assert by_desc["POSTO SHELL"]["category_id"] == ids["cats"]["Combustível"]
-    assert api.get("/api/transactions", params={"account_id": acc["id"]}).json()["total"] == 0  # prévia não grava
+    assert (
+        api.get("/api/transactions", params={"account_id": acc["id"]}).json()["total"] == 0
+    )  # prévia não grava
 
     r = api.post("/api/import/statement/confirm", {"account_id": acc["id"], "items": p["items"]})
     assert r.json() == {"created": 3, "skipped": 0}
@@ -49,20 +58,34 @@ def test_csv_import_brazilian_format(api):
     acc = account(api)
     p = preview(api, CSV, "extrato.csv", acc["id"])
     assert [(i["description"], i["amount_cents"], i["type"]) for i in p["items"]] == [
-        ("Padaria", 1250, "expense"), ("Pix recebido", 100000, "income")]
+        ("Padaria", 1250, "expense"),
+        ("Pix recebido", 100000, "income"),
+    ]
 
 
 def test_import_rejects_unknown_format(api):
     acc = account(api)
-    r = api.c.post("/api/import/statement/preview", files={"file": ("x.exe", b"MZ")}, data={"account_id": acc["id"]},
-                   headers=api._h())
+    r = api.c.post(
+        "/api/import/statement/preview",
+        files={"file": ("x.exe", b"MZ")},
+        data={"account_id": acc["id"]},
+        headers=api._h(),
+    )
     assert r.status_code == 400
 
 
 def test_export_excel_and_pdf(api):
     acc = account(api)
-    api.post("/api/transactions", {"type": "expense", "account_id": acc["id"], "amount_cents": 4590,
-                                   "occurred_on": "2026-10-01", "description": "Mercado ção"})
+    api.post(
+        "/api/transactions",
+        {
+            "type": "expense",
+            "account_id": acc["id"],
+            "amount_cents": 4590,
+            "occurred_on": "2026-10-01",
+            "description": "Mercado ção",
+        },
+    )
     x = api.get("/api/export/transactions.xlsx")
     assert x.status_code == 200
     ws = load_workbook(io.BytesIO(x.content))["Lançamentos"]
@@ -73,8 +96,16 @@ def test_export_excel_and_pdf(api):
 
 def test_delete_account_requires_password_and_removes_everything(api, anon):
     acc = account(api)
-    api.post("/api/transactions", {"type": "expense", "account_id": acc["id"], "amount_cents": 100,
-                                   "occurred_on": "2026-10-01", "description": "x"})
+    api.post(
+        "/api/transactions",
+        {
+            "type": "expense",
+            "account_id": acc["id"],
+            "amount_cents": 100,
+            "occurred_on": "2026-10-01",
+            "description": "x",
+        },
+    )
     bad = api.post("/api/auth/delete-account", {"password": "errada", "confirm": "EXCLUIR"})
     assert bad.status_code == 400
     ok = api.post("/api/auth/delete-account", {"password": "senha-forte-123", "confirm": "EXCLUIR"})

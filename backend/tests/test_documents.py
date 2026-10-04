@@ -19,8 +19,10 @@ def boleto_line(amount_cents: int, due: date) -> str:
     f2 = free[5:15]
     f3 = free[15:25]
     dv = doc_parser._mod10
-    return (f"{f1[:5]}.{f1[5:]}{dv(f1)} {f2[:5]}.{f2[5:]}{dv(f2)} {f3[:5]}.{f3[5:]}{dv(f3)} 7 "
-            f"{factor:04d}{amount_cents:010d}")
+    return (
+        f"{f1[:5]}.{f1[5:]}{dv(f1)} {f2[:5]}.{f2[5:]}{dv(f2)} {f3[:5]}.{f3[5:]}{dv(f3)} 7 "
+        f"{factor:04d}{amount_cents:010d}"
+    )
 
 
 def bill_pdf(text_lines: list[str]) -> bytes:
@@ -54,7 +56,9 @@ def test_decode_boleto_detects_typo():
 
 
 def test_parse_text_labels():
-    text = "Vivo Internet\nBeneficiário: Telefônica Brasil S.A.\nVencimento: 10/11/2026\nValor a pagar: R$ 99,90"
+    text = (
+        "Vivo Internet\nBeneficiário: Telefônica Brasil S.A.\nVencimento: 10/11/2026\nValor a pagar: R$ 99,90"
+    )
     ex = doc_parser.parse_text(text, date(2026, 10, 4))
     assert ex.amount_cents == 9990
     assert ex.due_date == date(2026, 11, 10)
@@ -65,9 +69,15 @@ def test_parse_text_labels():
 # ---------- API ----------
 def test_pdf_bill_read_without_ai(api, ids):
     due = TODAY + timedelta(days=6)
-    pdf = bill_pdf(["Conta de Internet - Vivo", "Beneficiario: Telefonica Brasil SA",
-                    f"Vencimento: {due.strftime('%d/%m/%Y')}", "Valor do documento: R$ 99,90",
-                    boleto_line(9990, due)])
+    pdf = bill_pdf(
+        [
+            "Conta de Internet - Vivo",
+            "Beneficiario: Telefonica Brasil SA",
+            f"Vencimento: {due.strftime('%d/%m/%Y')}",
+            "Valor do documento: R$ 99,90",
+            boleto_line(9990, due),
+        ]
+    )
     r = upload(api, pdf, "conta.pdf", "application/pdf")
     assert r.status_code == 201, r.text
     body = r.json()
@@ -81,10 +91,19 @@ def test_pdf_bill_read_without_ai(api, ids):
     assert "Linha digitável" in p["notes"]
 
     # Confirmar como recorrência mensal + lançamento do mês
-    tx = {k: p[k] for k in ("type", "amount_cents", "occurred_on", "description", "category_id", "account_id", "status")}
-    rec = {"type": "expense", "account_id": p["account_id"], "description": p["description"], "amount_cents": 9990,
-           "category_id": p["category_id"], "start_date": (due + timedelta(days=31)).isoformat(),
-           "day_of_month": due.day}
+    tx = {
+        k: p[k]
+        for k in ("type", "amount_cents", "occurred_on", "description", "category_id", "account_id", "status")
+    }
+    rec = {
+        "type": "expense",
+        "account_id": p["account_id"],
+        "description": p["description"],
+        "amount_cents": 9990,
+        "category_id": p["category_id"],
+        "start_date": (due + timedelta(days=31)).isoformat(),
+        "day_of_month": due.day,
+    }
     c = api.post(f"/api/documents/{doc['id']}/confirm", {"transaction": tx, "recurrence": rec})
     assert c.status_code == 200, c.text
     assert c.json()["document"]["status"] == "confirmed" and c.json()["transaction_id"]
@@ -125,8 +144,15 @@ def test_ai_reads_photo_and_cannot_override_valid_boleto(api, ids):
         name = "fake"
 
         def generate_json(self, system, prompt, image=None, mime=None):
-            return {"document_type": "boleto", "title": "Conta de luz", "total": 999.99, "barcode": line,
-                    "due_date": "2030-01-01", "recurring": True, "legible": True}
+            return {
+                "document_type": "boleto",
+                "title": "Conta de luz",
+                "total": 999.99,
+                "barcode": line,
+                "due_date": "2030-01-01",
+                "recurring": True,
+                "legible": True,
+            }
 
     set_provider_for_tests(FakeAI())
     try:

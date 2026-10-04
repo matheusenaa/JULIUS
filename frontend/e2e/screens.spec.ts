@@ -8,6 +8,7 @@ test("capturas de tela", async ({ page }, info) => {
   await page.getByLabel("E-mail").fill(`shot-${Date.now()}-${info.project.name}@teste.com`);
   await page.getByLabel("Senha").fill("senha-forte-123");
   await page.getByRole("button", { name: "Criar conta" }).click();
+  await page.getByRole("button", { name: "Pular configuração" }).click();
   await page.getByRole("heading", { name: "Olá, Ana" }).waitFor();
 
   const api = async (path: string, body: unknown) => {
@@ -39,10 +40,16 @@ test("capturas de tela", async ({ page }, info) => {
     data: { category_id: cat("Alimentação"), amount_cents: 45000 },
     headers: { "X-CSRF-Token": (await page.context().cookies()).find((c) => c.name === "julius_csrf")!.value },
   });
+  await api("/api/debts", { name: "Notebook", creditor: "Loja X", original_cents: 300000, installments_total: 12, installment_cents: 25000, installments_paid_before: 5, first_due_date: d(-150), account_id: bank.id });
+  await api("/api/transactions", { type: "expense", account_id: bank.id, amount_cents: 18990, occurred_on: d(3), description: "Conta de luz", status: "confirmed", category_id: cat("Energia") });
   await api("/api/goals", { name: "Reserva de emergência", target_cents: 1500000, saved_cents: 420000, target_date: d(300) });
 
   for (const [name, path] of [
     ["inicio", "/"],
+    ["visao", "/visao-geral"],
+    ["futuros", "/futuros"],
+    ["dividas", "/dividas"],
+    ["documentos", "/documentos"],
     ["lancamentos", "/lancamentos"],
     ["relatorios", "/relatorios"],
     ["contas", "/contas"],

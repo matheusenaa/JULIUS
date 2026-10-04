@@ -136,7 +136,12 @@ def test_confirmed_correction_teaches_categorizer(api, ids):
     body = {k: p[k] for k in ("type", "amount_cents", "occurred_on", "account_id")}
     r = api.post(
         "/api/transactions",
-        {**body, "description": "Lojinha do bairro", "category_id": ids["cats"]["Casa"], "source": "quick_input"},
+        {
+            **body,
+            "description": "Lojinha do bairro",
+            "category_id": ids["cats"]["Casa"],
+            "source": "quick_input",
+        },
     )
     assert r.status_code == 201
     assert parse(api, "25 na lojinha")["category_id"] == ids["cats"]["Casa"]

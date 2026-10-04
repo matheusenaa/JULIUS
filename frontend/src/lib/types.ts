@@ -1,5 +1,5 @@
 export type TxType = "income" | "expense" | "transfer";
-export type TxStatus = "paid" | "pending";
+export type TxStatus = "pending" | "confirmed" | "paid" | "canceled";
 export type PaymentMethod = "pix" | "debit" | "credit" | "cash" | "boleto" | "transfer" | "other";
 export type AccountKind = "checking" | "savings" | "cash" | "wallet" | "credit_card" | "investment" | "other";
 
@@ -7,7 +7,16 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  settings: { mode?: "basic" | "advanced"; default_account_id?: string };
+  settings: {
+    mode?: "basic" | "advanced";
+    default_account_id?: string;
+    currency?: "BRL" | "USD" | "EUR";
+    ai_enabled?: boolean;
+    ai_share_descriptions?: boolean;
+    ai_custom_instructions?: string;
+    notify_due?: boolean;
+    onboarded?: boolean;
+  };
 }
 
 export interface Invoice {
@@ -63,6 +72,8 @@ export interface Transaction {
   installment_plan_id: string | null;
   installment_number: number | null;
   installment_total: number | null;
+  debt_id?: string | null;
+  debt_installment?: number | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -113,13 +124,15 @@ export interface Recurrence {
 }
 
 export interface UpcomingItem {
-  kind: "pending" | "recurrence" | "invoice";
+  kind: "transaction" | "recurrence" | "invoice" | "debt";
   id: string;
   date: string;
   type: TxType;
   description: string;
   amount_cents: number;
   overdue: boolean;
+  status?: string;
+  extra?: Record<string, unknown>;
 }
 
 export interface CategoryTotal {
@@ -223,7 +236,7 @@ export interface Proposal {
   is_fixed: boolean;
   recurrence: { frequency: "weekly" | "monthly" | "yearly"; day_of_month: number } | null;
   notes?: string | null;
-  engine: "local" | "ai";
+  engine: "local" | "ai" | "rules" | "rules+ai";
   ai_error?: boolean;
   learned?: boolean;
   confidence?: number;
@@ -236,6 +249,7 @@ export interface AssistantAnswer {
   engine: string;
   is_estimate: boolean;
   conversation_id: string;
+  actions?: AIActionItem[];
 }
 
 export interface AuditEntry {
@@ -245,4 +259,135 @@ export interface AuditEntry {
   action: string;
   summary: string;
   created_at: string;
+}
+
+// ---------- Atualização 2 ----------
+export type EventStatus = "pending" | "confirmed" | "overdue" | "scheduled";
+
+export interface TimelineEvent {
+  date: string;
+  effective: string;
+  kind: "transaction" | "recurrence" | "invoice" | "debt";
+  flow: "in" | "out";
+  amount_cents: number;
+  description: string;
+  status: EventStatus;
+  ref_id: string;
+  account_id: string | null;
+  category_id: string | null;
+  extra: Record<string, unknown>;
+  balance_after: number;
+}
+
+export interface Timeline {
+  today: string;
+  until: string;
+  start_balance_cents: number;
+  end_balance_cents: number;
+  income_cents: number;
+  expense_cents: number;
+  lowest: { date: string; balance_cents: number };
+  events: TimelineEvent[];
+}
+
+export interface DebtItem {
+  id: string;
+  name: string;
+  creditor: string | null;
+  kind: string;
+  status: "active" | "canceled";
+  original_cents: number;
+  installments_total: number;
+  installment_cents: number;
+  installments_paid_before: number;
+  first_due_date: string;
+  interest_monthly_bp: number | null;
+  account_id: string | null;
+  category_id: string | null;
+  notes: string | null;
+  paid_installments: number;
+  remaining_installments: number;
+  paid_cents: number;
+  remaining_cents: number;
+  total_cents: number;
+  next_due: string | null;
+  end_date: string;
+  situation: "em_dia" | "atrasada" | "quitada" | "cancelada";
+  overdue_installments: number;
+}
+
+export interface CalendarDay {
+  date: string;
+  in_cents: number;
+  out_cents: number;
+  events: { description: string; amount_cents: number; flow: "in" | "out"; status: EventStatus; kind: string }[];
+}
+
+export interface Overview {
+  today: string;
+  horizon_days: number;
+  kpis: {
+    balance_cents: number;
+    month_income_cents: number;
+    month_expense_cents: number;
+    projected_month_end_cents: number;
+    projected_horizon_cents: number;
+    to_pay_cents: number;
+    to_receive_cents: number;
+    overdue_count: number;
+    debts_remaining_cents: number;
+    installments_remaining_cents: number;
+  };
+  timeline: { start_balance_cents: number; end_balance_cents: number; lowest: { date: string; balance_cents: number }; events: TimelineEvent[] };
+  projection: { date: string; balance_cents: number }[];
+  history: { date: string; balance_cents: number }[];
+  monthly: { month: string; income: number; expense: number }[];
+  categories: CategoryTotal[];
+  calendar: CalendarDay[];
+  debts: { id: string; name: string; creditor: string | null; remaining_cents: number; remaining_installments: number; installments_total: number; next_due: string | null; situation: string }[];
+  installments: { id: string; description: string; total_cents: number; installments: number; remaining_installments: number; remaining_cents: number; next_date: string | null }[];
+  recurring: { monthly_in_cents: number; monthly_out_cents: number; count: number };
+  goals: GoalStatus[];
+  alerts: { level: "info" | "warning" | "danger"; text: string }[];
+}
+
+export interface DocumentItem {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  title: string | null;
+  kind: "receipt" | "bill" | "invoice" | "pix" | "statement" | "contract" | "other";
+  status: "uploaded" | "review" | "confirmed" | "discarded";
+  transaction_id: string | null;
+  created_at: string;
+  amount_cents: number | null;
+  due_date: string | null;
+  beneficiary: string | null;
+  institution: string | null;
+  barcode: string | null;
+  barcode_valid: boolean | null;
+  document_number: string | null;
+  pix_key: string | null;
+  engine: string | null;
+  warnings: string[];
+}
+
+export interface AIActionItem {
+  id: string;
+  tool: string;
+  summary: string;
+  status: "pending" | "confirmed" | "rejected" | "expired" | "failed";
+  result: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface SyncStatus {
+  linked: boolean;
+  remote_url: string | null;
+  remote_email: string | null;
+  last_sync_at: string | null;
+  last_error: string | null;
+  pending: number;
+  conflicts: { id: string; entity: string; entity_id: string; local: Record<string, unknown>; remote: Record<string, unknown>; created_at: string }[];
 }

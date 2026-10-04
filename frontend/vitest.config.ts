@@ -10,5 +10,8 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     pool: "threads",
+    // Um worker: confiável em máquinas com pouca memória (iniciar vários estoura o tempo limite)
+    maxWorkers: 1,
+    fileParallelism: false,
   },
 });

@@ -82,7 +82,7 @@ export function Register() {
     try {
       const user = await api<User>("/api/auth/register", { body: { name: name.trim(), email: email.trim(), password } });
       queryClient.setQueryData(["me"], user);
-      navigate("/", { replace: true });
+      navigate("/boas-vindas", { replace: true });
     } catch (err) {
       setError(errorMessage(err));
     } finally {

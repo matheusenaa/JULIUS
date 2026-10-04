@@ -3,7 +3,8 @@ import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { createBrowserRouter, Navigate, RouterProvider, useLocation, useRouteError } from "react-router";
 
 import { AppShell } from "./components/AppShell";
-import { ErrorState, Logo, Skeleton } from "./components/ui";
+import { Splash } from "./components/Brand";
+import { ErrorState, Skeleton } from "./components/ui";
 import { errorMessage } from "./lib/api";
 import { queryClient, useMe } from "./lib/queries";
 import { Login, Register } from "./pages/Auth";
@@ -19,14 +20,11 @@ const Planning = lazy(() => import("./pages/Planning"));
 const Categories = lazy(() => import("./pages/Categories"));
 const Settings = lazy(() => import("./pages/Settings"));
 const More = lazy(() => import("./pages/Settings").then((m) => ({ default: m.More })));
-
-function Splash() {
-  return (
-    <div className="auth">
-      <Logo />
-    </div>
-  );
-}
+const Overview = lazy(() => import("./pages/Overview"));
+const Futures = lazy(() => import("./pages/Futures"));
+const Debts = lazy(() => import("./pages/Debts"));
+const Documents = lazy(() => import("./pages/Documents"));
+const Onboarding = lazy(() => import("./pages/Onboarding"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { data: me, isLoading, isFetching, error, refetch } = useMe();
@@ -51,7 +49,9 @@ function RedirectIfAuthed({ children }: { children: ReactNode }) {
   const restoring = useIsRestoring();
   const from = (useLocation().state as { from?: string } | null)?.from ?? "/";
   if (restoring || isLoading) return <Splash />;
-  return me ? <Navigate to={from} replace /> : <>{children}</>;
+  // Conta recém-criada vai para a configuração inicial; contas antigas não têm a marca e seguem direto
+  if (me) return <Navigate to={me.settings.onboarded === false ? "/boas-vindas" : from} replace />;
+  return <>{children}</>;
 }
 
 function RouteError() {
@@ -68,12 +68,17 @@ const page = (el: ReactNode) => <Suspense fallback={<Skeleton lines={5} />}>{el}
 const router = createBrowserRouter([
   { path: "/entrar", element: <RedirectIfAuthed><Login /></RedirectIfAuthed> },
   { path: "/criar-conta", element: <RedirectIfAuthed><Register /></RedirectIfAuthed> },
+  { path: "/boas-vindas", element: <RequireAuth>{page(<Onboarding />)}</RequireAuth> },
   {
     path: "/",
     element: <RequireAuth><AppShell /></RequireAuth>,
     errorElement: <RouteError />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: "visao-geral", element: page(<Overview />) },
+      { path: "futuros", element: page(<Futures />) },
+      { path: "dividas", element: page(<Debts />) },
+      { path: "documentos", element: page(<Documents />) },
       { path: "lancamentos", element: page(<Transactions />) },
       { path: "relatorios", element: page(<Reports />) },
       { path: "assistente", element: page(<Assistant />) },

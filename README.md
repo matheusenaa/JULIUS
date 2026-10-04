@@ -8,7 +8,12 @@ Tudo é gratuito: código aberto, banco local (SQLite) ou PostgreSQL no plano gr
 
 | Área | Recursos |
 |---|---|
-| Lançamentos | Receita, despesa e transferência; realizado ou previsto; fixa/variável; forma de pagamento; observações; edição com proteção contra conflito; exclusão com “desfazer” |
+| Visão geral | Saldo agora, entrou/saiu, fim do mês estimado, a pagar/receber, dívidas; gráfico do saldo (realizado + projeção), calendário financeiro, receitas × despesas, categorias, parcelamentos, recorrentes, metas e alertas |
+| Futuros | Linha do tempo de tudo que vai entrar e sair (salário, contas, faturas, parcelas) **com o saldo depois de cada um**; atalhos para salário, conta, aluguel, assinatura, parcela, financiamento; pagar, confirmar, cancelar, pular |
+| Status | Previsto, confirmado, pago e cancelado; **atrasado** é calculado (nunca fica desatualizado) |
+| Dívidas | Empréstimos, financiamentos, carnês: restante, parcelas e próximo vencimento calculados; “paguei a parcela” |
+| Documentos | Foto, câmera ou PDF de conta/boleto/comprovante → leitura (PDF e linha digitável **sem IA**; fotos com IA) → revisão → confirmar como lançamento e/ou recorrência |
+| Lançamentos | Receita, despesa e transferência; edição com proteção contra conflito; exclusão com “desfazer” |
 | Quick Input | Frase em português → proposta (tipo, valor, categoria, data, conta, parcelas, recorrência) para confirmar, corrigir ou ignorar. Funciona **sem IA** |
 | Aprendizado | Correções de categoria viram regras; a próxima sugestão já usa sua preferência |
 | Contas e cartões | Saldo por conta; cartão com limite, fechamento, vencimento, faturas e pagamento de fatura (transferência — sem contar a despesa duas vezes) |
@@ -16,11 +21,12 @@ Tudo é gratuito: código aberto, banco local (SQLite) ou PostgreSQL no plano gr
 | Recorrências | Aluguel, salário, assinaturas: previsões automáticas, “Paguei/Recebi” e “Pular”, sem duplicar |
 | Dashboard | Saldo disponível, entradas/saídas do mês, saldo previsto para o fim do mês, próximos vencimentos, categorias, últimas movimentações, metas, cartões, orçamentos e alertas |
 | Relatórios | Dia, semana, mês e ano; comparação com o período anterior; por categoria; fixas × variáveis; maiores despesas; gráfico com tabela alternativa; projeção (rotulada como estimativa) |
-| Assistente | Perguntas em português respondidas com consultas ao banco; histórico de conversas |
-| Comprovantes | Foto/PDF guardado e lido por IA multimodal (Gemini/OpenAI) → proposta para confirmar |
+| Assistente | Perguntas em português respondidas com dados reais (“quanto vou gastar até o fim do mês?”, “por que gastei mais?”, “quanto devo?”). Com IA: agente com ferramentas controladas; criar/alterar/excluir **só com sua confirmação** |
 | Orçamentos e metas | Limite mensal por categoria (alerta em 80%), metas com valor mensal necessário |
-| Offline | Abre sem internet (PWA); lançamentos feitos offline ficam numa fila e sincronizam sozinhos, sem duplicar |
-| Dados | Exportação CSV (abre no Excel) e backup JSON completo; restauração que nunca apaga; backup do arquivo SQLite |
+| Offline | Abre sem internet (PWA); criar, editar e excluir offline entram numa fila (pendente → sincronizando → sincronizado; falhou → tentar de novo) |
+| Sincronização | Computador (instalação local) ↔ servidor online ↔ celular, com versões e **conflitos decididos por você** |
+| Computador | Executável `JULIUS.exe` (banco no próprio PC) — veja [desktop/README.md](desktop/README.md) |
+| Dados | Exportação CSV, Excel, PDF (relatório do mês) e JSON; importação de extrato OFX/CSV com prévia e sem duplicar; restauração que nunca apaga; exclusão definitiva da conta |
 | Histórico | Toda criação, edição, exclusão e troca de categoria registrada |
 
 ## Tecnologias
@@ -84,20 +90,29 @@ Documentação interativa da API (fora de produção): http://127.0.0.1:8010/api
 ## Testes
 
 ```powershell
-cd backend;  & "$env:USERPROFILE\.venvs\julius\Scripts\python.exe" -m pytest      # 68 testes: regras financeiras, auth, IA, OCR, backup, migrations
-cd frontend; npx vitest run                                                       # 21 testes: dinheiro e fila offline
+cd backend;  & "$env:USERPROFILE\.venvs\julius\Scripts\python.exe" -m pytest      # 111 testes: finanças, futuros, dívidas, documentos, agente, sincronização, migrations
+cd frontend; npx vitest run                                                       # 24 testes: dinheiro e fila offline
 cd frontend; npx tsc --noEmit                                                     # tipos
+cd backend;  python -m tests.perf_check                                           # desempenho com 20 mil lançamentos
 ```
 
-**E2E** (Playwright usando o Edge instalado; fluxos em desktop e celular, incluindo modo offline):
+**E2E** (Playwright usando o Edge instalado; 10 fluxos × desktop e celular, incluindo offline, documentos e assistente):
 
 ```powershell
-# terminal 1 — servidor de teste com limites altos
+# terminal 1 — servidor de teste com banco próprio e limites altos
 cd backend; $env:DATABASE_URL="sqlite:///data/e2e.db"; $env:REGISTER_LIMIT_PER_HOUR="1000"
-alembic upgrade head; uvicorn app.main:app --port 8010
+alembic upgrade head; uvicorn app.main:app --port 8011
 # terminal 2
-cd frontend; npx vite build; npx playwright test
+cd frontend; npx vite build; $env:E2E_BASE_URL="http://127.0.0.1:8011"; npx playwright test
 ```
+
+## Inteligência artificial (opcional e gratuita)
+
+1. Gere uma chave grátis em https://aistudio.google.com/apikey.
+2. Em `backend/.env`: `AI_PROVIDER=gemini` e `GEMINI_API_KEY=...` (na versão de computador: `%LOCALAPPDATA%\JULIUS\julius.env`).
+3. **Seu agente do Gemini:** o JULIUS usa o agente pela API do Gemini, no servidor (a chave nunca vai ao navegador). Cole as instruções do seu agente/Gem em Ajustes → IA (ou aponte `AI_AGENT_INSTRUCTIONS_FILE` para um arquivo). As regras de segurança do JULIUS continuam valendo: a IA só usa ferramentas de leitura liberadas e qualquer criação, alteração ou exclusão espera sua confirmação.
+
+Perguntas comuns (saldo, gastos, vencimentos, dívidas…) são respondidas por regras locais na hora, sem gastar cota de IA; o agente entra nas perguntas abertas.
 
 ## Build e Deploy (gratuito)
 
@@ -123,6 +138,7 @@ Senhas com Argon2id · sessão em cookie `httpOnly`/`SameSite=Lax` (`Secure` em 
 ```
 backend/   app/{api,services,ai,models,security}, migrations/, tests/
 frontend/  src/{pages,components,lib,styles}, e2e/
-docs/      ARQUITETURA.md
+desktop/   launcher.py, julius.spec (executável para computador)
+docs/      ARQUITETURA.md, ATUALIZACAO-2.md
 scripts/   setup.ps1, start.ps1, dev.ps1
 ```

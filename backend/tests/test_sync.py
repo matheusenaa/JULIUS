@@ -26,13 +26,18 @@ PASSWORD = "senha-forte-123"
 def setup(tmp_path, anon):
     """Servidor online (app de teste) + instalação local com banco separado."""
     email = f"sync-{uuid.uuid4().hex[:6]}@t.com"
-    assert anon.post("/api/auth/register", {"email": email, "name": "Ana", "password": PASSWORD}).status_code == 201
+    assert (
+        anon.post("/api/auth/register", {"email": email, "name": "Ana", "password": PASSWORD}).status_code
+        == 201
+    )
     url = f"sqlite:///{(tmp_path / 'local.db').as_posix()}"
     command.upgrade(alembic_config(url), "head")
     engine = make_engine(url)
     db = sessionmaker(bind=engine, expire_on_commit=False)()
     local_user = auth_svc.register(db, email, "Ana", PASSWORD)
-    acc = tx_svc.get_owned(db, auth_svc.Account, db.scalar(select(auth_svc.Account.id)), local_user.id, "Conta")
+    acc = tx_svc.get_owned(
+        db, auth_svc.Account, db.scalar(select(auth_svc.Account.id)), local_user.id, "Conta"
+    )
     remote_http = TestClient(app, base_url="http://testserver")
     yield {"db": db, "user": local_user, "acc": acc, "remote": anon, "http": remote_http, "email": email}
     db.close()
@@ -41,10 +46,18 @@ def setup(tmp_path, anon):
 
 def local_tx(s, cents, desc="Café"):
     # A conta pode ter sido unida à do servidor no vínculo: busca a atual
-    acc_id = s["db"].scalar(select(auth_svc.Account.id).where(
-        auth_svc.Account.user_id == s["user"].id, auth_svc.Account.deleted_at.is_(None)))
-    return tx_svc.create(s["db"], s["user"].id, TransactionIn(
-        type="expense", account_id=acc_id, amount_cents=cents, occurred_on=date.today(), description=desc))
+    acc_id = s["db"].scalar(
+        select(auth_svc.Account.id).where(
+            auth_svc.Account.user_id == s["user"].id, auth_svc.Account.deleted_at.is_(None)
+        )
+    )
+    return tx_svc.create(
+        s["db"],
+        s["user"].id,
+        TransactionIn(
+            type="expense", account_id=acc_id, amount_cents=cents, occurred_on=date.today(), description=desc
+        ),
+    )
 
 
 def client(s):
@@ -66,8 +79,11 @@ def test_link_merges_defaults_and_uploads_local_data(setup):
     # Categorias padrão unidas: nenhuma duplicada no servidor nem no local
     remote_cats = s["remote"].get("/api/categories").json()
     assert len({(c["name"], c["kind"], c["parent_id"] is None) for c in remote_cats}) == len(remote_cats)
-    local_count = s["db"].scalar(select(func.count()).select_from(Category).where(
-        Category.user_id == s["user"].id, Category.deleted_at.is_(None)))
+    local_count = s["db"].scalar(
+        select(func.count())
+        .select_from(Category)
+        .where(Category.user_id == s["user"].id, Category.deleted_at.is_(None))
+    )
     assert local_count == len(remote_cats)
     # A conta "Carteira" padrão também foi unida (o lançamento aponta para a conta do servidor)
     accounts = s["remote"].get("/api/accounts").json()
@@ -81,13 +97,23 @@ def test_changes_flow_both_ways(setup):
     c.link("http://testserver", s["email"], PASSWORD)
     # Celular/web altera no servidor → computador recebe
     acc_id = s["remote"].get("/api/accounts").json()[0]["id"]
-    created = s["remote"].post("/api/transactions", {"type": "expense", "account_id": acc_id, "amount_cents": 9900,
-                                                     "occurred_on": date.today().isoformat(), "description": "Internet"})
+    created = s["remote"].post(
+        "/api/transactions",
+        {
+            "type": "expense",
+            "account_id": acc_id,
+            "amount_cents": 9900,
+            "occurred_on": date.today().isoformat(),
+            "description": "Internet",
+        },
+    )
     c.sync()
     local = s["db"].get(Transaction, created.json()["id"])
     assert local is not None and local.amount_cents == 9900 and local.synced_version == local.version
     # Computador altera → servidor recebe
-    tx_svc.update(s["db"], s["user"].id, local.id, TransactionUpdate(version=local.version, amount_cents=10500))
+    tx_svc.update(
+        s["db"], s["user"].id, local.id, TransactionUpdate(version=local.version, amount_cents=10500)
+    )
     stats = c.sync()
     assert stats["pushed"]["applied"] == 1
     assert remote_items(s, "Internet")[0]["amount_cents"] == 10500
@@ -158,8 +184,14 @@ def test_offline_keeps_local_data_and_reports(setup):
     c.http = httpx.Client(transport=httpx.MockTransport(offline), base_url="http://testserver")
     with pytest.raises(SyncError):
         c.sync()
-    assert s["db"].scalar(select(func.count()).select_from(Transaction).where(
-        Transaction.description == "Feito sem internet")) == 1
+    assert (
+        s["db"].scalar(
+            select(func.count())
+            .select_from(Transaction)
+            .where(Transaction.description == "Feito sem internet")
+        )
+        == 1
+    )
     status_error = c.state.last_error
     assert status_error and "conexão" in status_error.lower()
     # Internet volta: o pendente é enviado
@@ -171,10 +203,29 @@ def test_offline_keeps_local_data_and_reports(setup):
 def test_server_rejects_foreign_references(setup, anon):
     s = setup
     other = Api(TestClient(app))
-    other.post("/api/auth/register", {"email": f"x{uuid.uuid4().hex[:5]}@t.com", "name": "X", "password": PASSWORD})
+    other.post(
+        "/api/auth/register", {"email": f"x{uuid.uuid4().hex[:5]}@t.com", "name": "X", "password": PASSWORD}
+    )
     foreign_acc = other.get("/api/accounts").json()[0]["id"]
-    r = s["remote"].post("/api/sync/push", {"changes": [{"entity": "transactions", "id": str(uuid.uuid4()),
-                                                         "base_version": None, "data": {
-        "account_id": foreign_acc, "type": "expense", "status": "paid", "amount_cents": 100,
-        "occurred_on": date.today().isoformat(), "description": "invasão", "source": "manual"}}]})
+    r = s["remote"].post(
+        "/api/sync/push",
+        {
+            "changes": [
+                {
+                    "entity": "transactions",
+                    "id": str(uuid.uuid4()),
+                    "base_version": None,
+                    "data": {
+                        "account_id": foreign_acc,
+                        "type": "expense",
+                        "status": "paid",
+                        "amount_cents": 100,
+                        "occurred_on": date.today().isoformat(),
+                        "description": "invasão",
+                        "source": "manual",
+                    },
+                }
+            ]
+        },
+    )
     assert r.json()["results"][0]["status"] == "rejected"

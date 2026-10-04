@@ -7,7 +7,12 @@ import type {
   BudgetStatus,
   Category,
   Dashboard,
+  DebtItem,
+  DocumentItem,
   GoalStatus,
+  Overview,
+  SyncStatus,
+  Timeline,
   Recurrence,
   Report,
   TransactionPage,
@@ -28,7 +33,7 @@ export const queryClient = new QueryClient({
 
 /** Após qualquer alteração financeira, tudo que depende de saldo é recarregado. */
 export function invalidateFinance() {
-  for (const key of ["dashboard", "transactions", "accounts", "reports", "budgets", "goals", "recurrences", "occurrences", "audit"]) {
+  for (const key of ["dashboard", "transactions", "accounts", "reports", "budgets", "goals", "recurrences", "occurrences", "audit", "overview", "timeline", "debts", "documents", "sync-status"]) {
     queryClient.invalidateQueries({ queryKey: [key] });
   }
 }
@@ -57,7 +62,7 @@ export const useAudit = () => useQuery({ queryKey: ["audit"], queryFn: () => api
 export const useAiStatus = () =>
   useQuery({
     queryKey: ["ai-status"],
-    queryFn: () => api<{ enabled: boolean; provider: string | null }>("/api/ai/status"),
+    queryFn: () => api<{ enabled: boolean; configured: boolean; user_enabled: boolean; agent: boolean; provider: string | null }>("/api/ai/status"),
     staleTime: 10 * 60_000,
   });
 
@@ -83,6 +88,23 @@ export const useTransactions = (f: TxFilters) =>
     queryFn: () => api<TransactionPage>(`/api/transactions${qs({ ...f, page_size: 50 } as Record<string, string | number | boolean | undefined>)}`),
     placeholderData: (prev) => prev,
   });
+
+export const useOverview = (days = 30, month?: string) =>
+  useQuery({
+    queryKey: ["overview", days, month ?? ""],
+    queryFn: () => api<Overview>(`/api/overview${qs({ days, month })}`),
+    placeholderData: (prev) => prev,
+  });
+export const useTimeline = (days = 60) =>
+  useQuery({ queryKey: ["timeline", days], queryFn: () => api<Timeline>(`/api/timeline${qs({ days })}`) });
+export const useDebts = () => useQuery({ queryKey: ["debts"], queryFn: () => api<DebtItem[]>("/api/debts") });
+export const useDocuments = (status?: string) =>
+  useQuery({
+    queryKey: ["documents", status ?? ""],
+    queryFn: () => api<{ items: DocumentItem[]; total: number }>(`/api/documents${qs({ status, page_size: 100 })}`),
+  });
+export const useSyncStatus = () =>
+  useQuery({ queryKey: ["sync-status"], queryFn: () => api<SyncStatus>("/api/sync/status"), refetchInterval: 60_000 });
 
 export const useReport = (period: string, ref: string) =>
   useQuery({
