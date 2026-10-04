@@ -1,4 +1,7 @@
+from typing import Literal
+
 from fastapi import APIRouter, Request, Response
+from pydantic import BaseModel, Field
 
 from app.api.deps import DB, SESSION_COOKIE, CurrentUser, client_ip
 from app.config import get_settings
@@ -76,6 +79,18 @@ def update_me(body: SettingsIn, user: CurrentUser, db: DB):
     audit.record(db, user.id, "user", user.id, "update", "Preferências atualizadas.")
     db.commit()
     return user
+
+
+class DeleteAccountIn(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
+    confirm: Literal["EXCLUIR"]
+
+
+@router.post("/delete-account", status_code=204)
+def delete_account(body: DeleteAccountIn, response: Response, user: CurrentUser, db: DB):
+    """Apaga DEFINITIVAMENTE a conta e todos os dados do usuário (não há como desfazer)."""
+    auth_service.delete_account(db, user, body.password)
+    response.delete_cookie(SESSION_COOKIE, path="/")
 
 
 @router.post("/password", status_code=204)

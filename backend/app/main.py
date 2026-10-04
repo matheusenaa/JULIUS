@@ -14,9 +14,12 @@ from app.api import (
     auth,
     categories,
     data,
+    debts,
+    documents,
     overview,
     planning,
     recurrences,
+    sync,
     transactions,
 )
 from app.config import get_settings
@@ -49,7 +52,20 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
-    routers = (auth, accounts, categories, transactions, recurrences, overview, planning, ai, data)
+    routers = (
+        auth,
+        accounts,
+        categories,
+        transactions,
+        recurrences,
+        overview,
+        planning,
+        ai,
+        data,
+        debts,
+        documents,
+        sync,
+    )
     for module in routers:
         app.include_router(module.router)
 

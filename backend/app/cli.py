@@ -1,6 +1,6 @@
 """Comandos de manutenção.
 
-    python -m app.cli backup [pasta]   # cópia consistente do SQLite (pode rodar com o app ligado)
+python -m app.cli backup [pasta]   # cópia consistente do SQLite (pode rodar com o app ligado)
 """
 
 import sqlite3

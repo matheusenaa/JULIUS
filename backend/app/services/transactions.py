@@ -11,6 +11,7 @@ from app.schemas import TransactionIn, TransactionOut, TransactionUpdate
 from app.services import audit, categorizer
 from app.services.cards import invoice_month_for, split_installments
 from app.services.dates import add_months, local_today
+from app.services.money import brl  # noqa: F401 — reexportado (usado por outros módulos)
 from app.services.ownership import get_owned
 
 TYPE_PT = {"income": "Receita", "expense": "Despesa", "transfer": "Transferência"}
@@ -26,11 +27,6 @@ AUDITED_FIELDS = (
     "is_fixed",
     "status",
 )
-
-
-def brl(cents: int) -> str:
-    s = f"{abs(cents) / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"{'-' if cents < 0 else ''}R$ {s}"
 
 
 def _snapshot(tx: Transaction) -> dict:
@@ -54,7 +50,9 @@ def _invoice(account: Account, tx_type: str, occurred_on: date) -> date | None:
     return None
 
 
-def create(db: Session, user_id: str, data: TransactionIn, today: date | None = None) -> Transaction:
+def create(
+    db: Session, user_id: str, data: TransactionIn, today: date | None = None, import_ref: str | None = None
+) -> Transaction:
     today = today or local_today()
     if data.id:
         existing = db.get(Transaction, data.id)
@@ -95,6 +93,7 @@ def create(db: Session, user_id: str, data: TransactionIn, today: date | None = 
             occurred_on=data.occurred_on,
             status=data.status,
             invoice_month=_invoice(account, data.type, data.occurred_on),
+            import_ref=import_ref,
             **common,
         )
         db.add(tx)
@@ -127,8 +126,8 @@ def create(db: Session, user_id: str, data: TransactionIn, today: date | None = 
         when = add_months(data.occurred_on, i)
         # No cartão a dívida já existe (consome limite); fora dele, parcela futura é prevista
         status = "paid" if account.kind == "credit_card" or when <= today else "pending"
-        if data.status == "pending":
-            status = "pending"
+        if data.status in ("pending", "confirmed"):
+            status = data.status
         tx = Transaction(
             id=data.id if i == 0 else None,
             amount_cents=cents,
@@ -184,7 +183,7 @@ def update(db: Session, user_id: str, tx_id: str, data: TransactionUpdate) -> Tr
     diff = audit.diff(before, _snapshot(tx))
     if not diff:
         return tx
-    tx.version += 1
+    # A versão sobe automaticamente no flush (models.base._bump_versions)
     if "category_id" in diff and tx.category_id:
         categorizer.learn(db, user_id, tx.description, tx.category_id)
         old = db.get(Category, before["category_id"]) if before["category_id"] else None
@@ -209,13 +208,13 @@ def delete(db: Session, user_id: str, tx_id: str, scope: str = "one") -> int:
                 Transaction.installment_number >= tx.installment_number,
                 Transaction.deleted_at.is_(None),
             )
-            .values(deleted_at=now, version=Transaction.version + 1)
+            # UPDATE em massa não passa pelo ORM: versão e updated_at à mão (sincronização)
+            .values(deleted_at=now, updated_at=now, version=Transaction.version + 1)
         )
         count = result.rowcount
         summary = f"{count} parcela(s) excluída(s): {tx.description}."
     else:
         tx.deleted_at = now
-        tx.version += 1
         count = 1
         summary = f"{TYPE_PT[tx.type]} de {brl(tx.amount_cents)} excluída: {tx.description}."
     audit.record(db, user_id, "transaction", tx.id, "delete", summary)
@@ -228,7 +227,6 @@ def restore(db: Session, user_id: str, tx_id: str) -> Transaction:
     if tx is None or tx.user_id != user_id or tx.deleted_at is None:
         raise BadRequest("Nada para desfazer.")
     tx.deleted_at = None
-    tx.version += 1
     audit.record(db, user_id, "transaction", tx.id, "restore", f"Lançamento restaurado: {tx.description}.")
     db.commit()
     return tx
@@ -287,7 +285,8 @@ def list_filtered(db: Session, user_id: str, f: dict, page: int, page_size: int)
     sums = dict(
         db.execute(
             select(Transaction.type, func.sum(Transaction.amount_cents))
-            .where(*cond, Transaction.type.in_(("income", "expense")))
+            # Cancelados aparecem na lista, mas não somam
+            .where(*cond, Transaction.type.in_(("income", "expense")), Transaction.status != "canceled")
             .group_by(Transaction.type)
         ).all()
     )

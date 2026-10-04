@@ -15,7 +15,42 @@ from app.services.cards import due_date
 
 
 def _active_tx(user_id: str):
-    return (Transaction.user_id == user_id, Transaction.deleted_at.is_(None))
+    """Transações que existem para fins financeiros: não excluídas e não canceladas."""
+    return (
+        Transaction.user_id == user_id,
+        Transaction.deleted_at.is_(None),
+        Transaction.status != "canceled",
+    )
+
+
+def cash_accounts(db: Session, user_id: str) -> dict[str, Account]:
+    """Contas que compõem o "dinheiro disponível" (exclui cartões e contas fora do total)."""
+    return {
+        a.id: a
+        for a in db.scalars(
+            select(Account).where(
+                Account.user_id == user_id,
+                Account.deleted_at.is_(None),
+                Account.kind != "credit_card",
+                Account.include_in_total.is_(True),
+            )
+        )
+    }
+
+
+def cards(db: Session, user_id: str) -> list[Account]:
+    return list(
+        db.scalars(
+            select(Account).where(
+                Account.user_id == user_id, Account.deleted_at.is_(None), Account.kind == "credit_card"
+            )
+        )
+    )
+
+
+def cash_balance(db: Session, user_id: str, today: date) -> int:
+    balances = account_balances(db, user_id, as_of=today)
+    return sum(balances.get(a, 0) for a in cash_accounts(db, user_id))
 
 
 def account_balances(
@@ -57,29 +92,9 @@ def card_amount_due_by(db: Session, card: Account, until: date) -> int:
     """Quanto do cartão vence até `until` e ainda não foi pago.
 
     Pagamentos (transferências para o cartão) quitam as faturas mais antigas primeiro.
+    Usa o mesmo cálculo da lista de faturas para os dois nunca divergirem.
     """
-    rows = db.execute(
-        select(Transaction.type, Transaction.invoice_month, func.sum(Transaction.amount_cents))
-        .where(*_active_tx(card.user_id), Transaction.account_id == card.id)
-        .group_by(Transaction.type, Transaction.invoice_month)
-    ).all()
-    charged = 0
-    for tx_type, invoice_month, total in rows:
-        if invoice_month is None or due_date(invoice_month, card.closing_day, card.due_day) > until:
-            continue
-        if tx_type == "expense":
-            charged += int(total)
-        elif tx_type == "income":  # estorno
-            charged -= int(total)
-    paid = db.scalar(
-        select(func.coalesce(func.sum(Transaction.amount_cents), 0)).where(
-            *_active_tx(card.user_id),
-            Transaction.type == "transfer",
-            Transaction.to_account_id == card.id,
-            Transaction.status == "paid",
-        )
-    )
-    return max(0, charged - int(paid or 0))
+    return sum(i["remaining_cents"] for i in card_invoices(db, card) if i["due_date"] <= until)
 
 
 def card_invoices(db: Session, card: Account) -> list[dict]:

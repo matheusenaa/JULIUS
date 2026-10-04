@@ -18,6 +18,7 @@ from app.models import (
     Budget,
     CategorizationRule,
     Category,
+    Debt,
     Goal,
     InstallmentPlan,
     Recurrence,
@@ -34,6 +35,7 @@ MODELS = [
     ("categories", Category),
     ("recurrences", Recurrence),
     ("installment_plans", InstallmentPlan),
+    ("debts", Debt),
     ("transactions", Transaction),
     ("budgets", Budget),
     ("goals", Goal),
@@ -41,7 +43,7 @@ MODELS = [
 ]
 
 TYPE_PT = {"income": "Receita", "expense": "Despesa", "transfer": "Transferência"}
-STATUS_PT = {"paid": "Realizado", "pending": "Previsto"}
+STATUS_PT = {"paid": "Realizado", "pending": "Previsto", "confirmed": "Confirmado", "canceled": "Cancelado"}
 PAYMENT_PT = {
     "pix": "Pix",
     "debit": "Débito",

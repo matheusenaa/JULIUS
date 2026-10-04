@@ -1,174 +1,66 @@
-"""Comprovantes (OCR), anexos, exportação e backup."""
+"""Seus dados: exportação (CSV, Excel, PDF, JSON), backup/restauração e importação de extratos."""
 
-import hashlib
 import json
-import logging
+from datetime import date
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Form, Query, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
-from app.ai.providers import AIUnavailable
-from app.ai.receipt import read_receipt, sniff
 from app.api.deps import DB, CurrentUser
-from app.config import get_settings
-from app.errors import AppError, BadRequest
-from app.models import Attachment, Transaction
-from app.security.ratelimit import ai_limiter
-from app.services import audit, backup
+from app.errors import BadRequest
+from app.models import Account, Transaction
+from app.schemas import TransactionIn
+from app.services import audit, backup, exporters, importers
+from app.services import transactions as tx_svc
 from app.services.dates import local_today
 from app.services.ownership import get_owned
 
 router = APIRouter(prefix="/api", tags=["dados"])
-log = logging.getLogger("julius.data")
+
+MAX_IMPORT = 10 * 1024 * 1024
 
 
-async def _read_upload(file: UploadFile) -> tuple[bytes, str]:
-    limit = get_settings().max_upload_mb * 1024 * 1024
-    data = await file.read(limit + 1)
-    if len(data) > limit:
-        raise BadRequest(f"Arquivo muito grande. Limite: {get_settings().max_upload_mb} MB.")
-    if not data:
-        raise BadRequest("Arquivo vazio.")
-    mime = sniff(data)  # confia no conteúdo, não na extensão informada
-    if mime is None:
-        raise BadRequest("Formato não suportado. Envie JPG, PNG, WEBP ou PDF.")
-    return data, mime
-
-
-def _attachment_out(a: Attachment) -> dict:
-    return {
-        "id": a.id,
-        "filename": a.filename,
-        "content_type": a.content_type,
-        "size_bytes": a.size_bytes,
-        "transaction_id": a.transaction_id,
-        "created_at": a.created_at,
-    }
-
-
-@router.post("/receipts/scan")
-async def scan_receipt(user: CurrentUser, db: DB, file: UploadFile = File(...)):
-    """Guarda o comprovante e devolve uma PROPOSTA de lançamento para confirmação."""
-    if not ai_limiter.hit(user.id):
-        raise AppError(429, "rate_limited", "Muitas leituras em pouco tempo. Aguarde um minuto.")
-    data, mime = await _read_upload(file)
-    attachment = Attachment(
-        user_id=user.id,
-        filename=(file.filename or "comprovante")[:200],
-        content_type=mime,
-        size_bytes=len(data),
-        sha256=hashlib.sha256(data).hexdigest(),
-        data=data,
-    )
-    db.add(attachment)
-    db.flush()
-    proposal, error = None, None
-    try:
-        proposal = read_receipt(db, user, data, mime, local_today())
-        attachment.extracted = proposal.pop("raw", None)
-    except AIUnavailable as exc:
-        error = (
-            str(exc)
-            if "precisa" in str(exc)
-            else "Não foi possível ler o comprovante agora. Preencha manualmente."
-        )
-        log.info("OCR indisponível: %s", exc)
-    db.commit()
-    return {"attachment": _attachment_out(attachment), "proposal": proposal, "error": error}
-
-
-@router.post("/attachments", status_code=201)
-async def upload_attachment(
-    user: CurrentUser, db: DB, file: UploadFile = File(...), transaction_id: str | None = None
-):
-    if transaction_id:
-        get_owned(db, Transaction, transaction_id, user.id, "Lançamento")
-    data, mime = await _read_upload(file)
-    a = Attachment(
-        user_id=user.id,
-        transaction_id=transaction_id,
-        filename=(file.filename or "arquivo")[:200],
-        content_type=mime,
-        size_bytes=len(data),
-        sha256=hashlib.sha256(data).hexdigest(),
-        data=data,
-    )
-    db.add(a)
-    db.flush()
-    audit.record(db, user.id, "attachment", a.id, "create", f'Anexo "{a.filename}" adicionado.')
-    db.commit()
-    return _attachment_out(a)
-
-
-class LinkIn(BaseModel):
-    transaction_id: str | None
-
-
-@router.patch("/attachments/{attachment_id}")
-def link_attachment(attachment_id: str, body: LinkIn, user: CurrentUser, db: DB):
-    a = get_owned(db, Attachment, attachment_id, user.id, "Anexo")
-    if body.transaction_id:
-        get_owned(db, Transaction, body.transaction_id, user.id, "Lançamento")
-    a.transaction_id = body.transaction_id
-    db.commit()
-    return _attachment_out(a)
-
-
-@router.get("/attachments")
-def list_attachments(user: CurrentUser, db: DB, transaction_id: str):
-    return [
-        _attachment_out(a)
-        for a in db.scalars(
-            select(Attachment).where(
-                Attachment.user_id == user.id, Attachment.transaction_id == transaction_id
-            )
-        )
-    ]
-
-
-@router.get("/attachments/{attachment_id}/file")
-def download_attachment(attachment_id: str, user: CurrentUser, db: DB):
-    a = get_owned(db, Attachment, attachment_id, user.id, "Anexo")
-    safe_name = "".join(ch for ch in a.filename if ch.isalnum() or ch in "._- ")[:100] or "anexo"
+def _download(body: bytes | str, media: str, filename: str) -> Response:
     return Response(
-        a.data,
-        media_type=a.content_type,
-        headers={
-            "Content-Disposition": f'inline; filename="{safe_name}"',
-            "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'",
-        },
+        body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
-
-
-@router.delete("/attachments/{attachment_id}", status_code=204)
-def delete_attachment(attachment_id: str, user: CurrentUser, db: DB):
-    a = get_owned(db, Attachment, attachment_id, user.id, "Anexo")
-    db.delete(a)
-    audit.record(db, user.id, "attachment", attachment_id, "delete", f'Anexo "{a.filename}" removido.')
-    db.commit()
 
 
 @router.get("/export/transactions.csv")
 def export_csv(user: CurrentUser, db: DB):
-    filename = f"julius-lancamentos-{local_today().isoformat()}.csv"
-    return Response(
+    return _download(
         backup.export_csv(db, user.id),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        "text/csv; charset=utf-8",
+        f"julius-lancamentos-{local_today().isoformat()}.csv",
+    )
+
+
+@router.get("/export/transactions.xlsx")
+def export_xlsx(user: CurrentUser, db: DB):
+    return _download(
+        exporters.transactions_xlsx(db, user.id),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        f"julius-lancamentos-{local_today().isoformat()}.xlsx",
+    )
+
+
+@router.get("/export/report.pdf")
+def export_pdf(user: CurrentUser, db: DB, month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$")):
+    ref = date.fromisoformat(f"{month}-01") if month else local_today()
+    return _download(
+        exporters.month_report_pdf(db, user, ref),
+        "application/pdf",
+        f"julius-relatorio-{ref.strftime('%Y-%m')}.pdf",
     )
 
 
 @router.get("/export/backup.json")
 def export_backup(user: CurrentUser, db: DB):
-    filename = f"julius-backup-{local_today().isoformat()}.json"
     body = json.dumps(backup.export_json(db, user), ensure_ascii=False, indent=1)
-    return Response(
-        body,
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return _download(body, "application/json", f"julius-backup-{local_today().isoformat()}.json")
 
 
 @router.post("/import/backup")
@@ -183,3 +75,77 @@ async def import_backup(user: CurrentUser, db: DB, file: UploadFile = File(...))
     if not isinstance(payload, dict):
         raise BadRequest("O arquivo não é um backup JSON válido.")
     return {"inserted": backup.restore_json(db, user, payload)}
+
+
+# ---------- Extratos bancários ----------
+@router.post("/import/statement/preview")
+async def statement_preview(
+    user: CurrentUser, db: DB, file: UploadFile = File(...), account_id: str = Form(...)
+):
+    """Lê o extrato e mostra o que seria importado. NADA é gravado nesta etapa."""
+    get_owned(db, Account, account_id, user.id, "Conta")
+    data = await file.read(MAX_IMPORT + 1)
+    if len(data) > MAX_IMPORT:
+        raise BadRequest("Arquivo muito grande (limite 10 MB).")
+    kind = importers.detect(file.filename or "", data)
+    rows = importers.PARSERS[kind](data)
+    items = importers.preview(db, user.id, account_id, rows)
+    return {"format": kind, "items": items, "duplicates": sum(1 for i in items if i["duplicate"])}
+
+
+class ImportItem(BaseModel):
+    occurred_on: date
+    amount_cents: int = Field(gt=0)
+    type: str
+    description: str = Field(min_length=1, max_length=200)
+    category_id: str | None = None
+    import_ref: str = Field(min_length=8, max_length=64)
+
+
+class ImportConfirm(BaseModel):
+    account_id: str
+    items: list[ImportItem] = Field(max_length=5000)
+
+
+@router.post("/import/statement/confirm")
+def statement_confirm(body: ImportConfirm, user: CurrentUser, db: DB):
+    get_owned(db, Account, body.account_id, user.id, "Conta")
+    existing = set(
+        db.scalars(
+            select(Transaction.import_ref).where(
+                Transaction.user_id == user.id, Transaction.import_ref.in_([i.import_ref for i in body.items])
+            )
+        )
+    )
+    created = skipped = 0
+    for item in body.items:
+        if item.import_ref in existing:
+            skipped += 1
+            continue
+        data = TransactionIn(
+            type="income" if item.type == "income" else "expense",
+            account_id=body.account_id,
+            amount_cents=item.amount_cents,
+            occurred_on=item.occurred_on,
+            description=item.description,
+            category_id=item.category_id,
+            source="import",
+        )
+        try:
+            tx_svc.create(db, user.id, data, import_ref=item.import_ref)  # referência gravada junto
+        except (BadRequest, IntegrityError):
+            db.rollback()
+            skipped += 1
+            continue
+        existing.add(item.import_ref)
+        created += 1
+    audit.record(
+        db,
+        user.id,
+        "import",
+        body.account_id,
+        "create",
+        f"Extrato importado: {created} lançamento(s), {skipped} ignorado(s).",
+    )
+    db.commit()
+    return {"created": created, "skipped": skipped}

@@ -46,8 +46,16 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     ai_timeout_seconds: float = 20.0
+    # Instruções do seu agente (ex.: texto de um Gem do Gemini): arquivo .md/.txt lido pelo backend
+    ai_agent_instructions_file: str = ""
 
     max_upload_mb: int = 8
+    # Onde guardar arquivos de documentos: "db" (no banco) ou "local" (pasta STORAGE_DIR)
+    storage_backend: Literal["db", "local"] = "db"
+    storage_dir: str = ""
+
+    # Instalação local (desktop): sincroniza com um servidor online (opcional)
+    sync_interval_seconds: int = 120
 
     @property
     def is_production(self) -> bool:

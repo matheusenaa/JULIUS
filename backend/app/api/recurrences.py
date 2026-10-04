@@ -161,7 +161,6 @@ def confirm(rec_id: str, body: OccurrenceConfirmIn, user: CurrentUser, db: DB):
         db.add(tx)
     else:  # estava marcada como pulada: reaproveita o registro
         tx.deleted_at = None
-        tx.version += 1
     tx.account_id = account.id
     tx.type = rec.type
     tx.status = "paid"

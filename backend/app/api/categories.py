@@ -80,11 +80,16 @@ def delete_category(category_id: str, user: CurrentUser, db: DB):
     cat = get_owned(db, Category, category_id, user.id, "Categoria")
     ids = [cat.id, *db.scalars(select(Category.id).where(Category.parent_id == cat.id))]
     now = utcnow()
-    db.execute(update(Category).where(Category.id.in_(ids)).values(deleted_at=now))
+    # UPDATE em massa: versão e updated_at à mão para a sincronização enxergar a mudança
+    db.execute(
+        update(Category)
+        .where(Category.id.in_(ids))
+        .values(deleted_at=now, updated_at=now, version=Category.version + 1)
+    )
     moved = db.execute(
         update(Transaction)
         .where(Transaction.category_id.in_(ids))
-        .values(category_id=None, version=Transaction.version + 1)
+        .values(category_id=None, updated_at=now, version=Transaction.version + 1)
     ).rowcount
     audit.record(
         db,

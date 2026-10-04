@@ -14,10 +14,13 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.ai.nlp_pt import keyword_category, month_from_text
-from app.ai.providers import AIUnavailable, get_provider
+from app.ai import tools
+from app.ai.nlp_pt import extract_amount, keyword_category, month_from_text
+from app.ai.providers import AIUnavailable, get_provider_for
 from app.models import Category, Recurrence, Transaction, User
 from app.services import analytics, ledger
+from app.services import debts as debts_svc
+from app.services import forecast as fc
 from app.services.categorizer import normalize
 from app.services.dates import MONTHS_PT, add_months, local_today, month_end, month_start, period_bounds
 from app.services.transactions import brl
@@ -42,6 +45,14 @@ NUMBERS = {
 }
 
 INTENTS = [
+    ("delete", r"\b(apag|exclu|remov|delet)\w*"),
+    (
+        "why_more",
+        r"por ?que (eu )?(gastei|estou gastando|gasto) mais|gastei mais (este|esse|neste|nesse) mes",
+    ),
+    ("month_spend", r"vou gastar|gastar ate o (fim|final)|ate o (fim|final) do mes"),
+    ("to_receive", r"vou receber|a receber|quanto (eu )?(vou )?receber"),
+    ("debts", r"quanto (eu )?devo|minhas dividas|\bdividas?\b"),
     ("forecast", r"daqui a|se eu continuar|projec|vou ter|terei|futuro"),
     ("can_spend", r"posso gastar|ainda posso|quanto sobra|vai sobrar"),
     (
@@ -49,7 +60,7 @@ INTENTS = [
         r"maior (categoria|gasto|despesa)|onde (eu )?(mais )?gast|com o que (eu )?(mais )?gast|o que mais gast",
     ),
     ("fixed", r"(despesas|gastos|contas) fix"),
-    ("upcoming", r"vencimento|vence|a pagar|proximas contas|contas a vencer"),
+    ("upcoming", r"vencimento|vence|a pagar|proximas contas|contas a vencer|tenho (para|pra) pagar"),
     ("average", r"\bmedia\b"),
     ("savings", r"economizei|guardei|poupei|sobrou"),
     ("compare", r"compar|aumentou|aumentaram|diminuiu|em relacao"),
@@ -173,12 +184,12 @@ def _facts(db: Session, user_id: str, today: date) -> dict:
     }
 
 
-def _classify_with_ai(question: str, db: Session, user_id: str, today: date) -> dict | None:
-    provider = get_provider()
+def _classify_with_ai(question: str, db: Session, user: User, today: date) -> dict | None:
+    provider = get_provider_for(user)
     if provider is None:
         return None
     cats = db.scalars(
-        select(Category).where(Category.user_id == user_id, Category.deleted_at.is_(None))
+        select(Category).where(Category.user_id == user.id, Category.deleted_at.is_(None))
     ).all()
     prompt = f"Hoje: {today.isoformat()}\nCategorias:\n" + "\n".join(f"{c.id} | {c.name}" for c in cats)
     prompt += f"\n\nPergunta: {question}"
@@ -188,8 +199,16 @@ def _classify_with_ai(question: str, db: Session, user_id: str, today: date) -> 
         return None
 
 
-def answer(db: Session, user: User, question: str, today: date | None = None) -> dict:
+def detect_intent(question: str) -> str:
+    norm = normalize(question)
+    return next((name for name, rx in INTENTS if re.search(rx, norm)), "unknown")
+
+
+def answer(
+    db: Session, user: User, question: str, today: date | None = None, conversation_id: str | None = None
+) -> dict:
     today = today or local_today()
+    action_ids: list[str] = []
     norm = normalize(question)
     intent = next((name for name, rx in INTENTS if re.search(rx, norm)), "unknown")
     start, end, label = _period(norm, today)
@@ -198,7 +217,7 @@ def answer(db: Session, user: User, question: str, today: date | None = None) ->
     engine = "rules"
 
     if intent == "unknown":
-        ai = _classify_with_ai(question, db, user.id, today)
+        ai = _classify_with_ai(question, db, user, today)
         if ai and ai.get("intent") in {n for n, _ in INTENTS}:
             engine = "ai"
             intent = ai["intent"]
@@ -378,9 +397,109 @@ def answer(db: Session, user: User, question: str, today: date | None = None) ->
             text += " Categorias que já superaram o mês passado: " + ", ".join(c["name"] for c in grew) + "."
         data = {"current_cents": r["expense_cents"], "previous_cents": prev["expense_cents"]}
 
+    elif intent == "delete":
+        amount = extract_amount(question)
+        if amount is None:
+            text = "Para excluir, diga o valor do lançamento. Ex.: “apague a despesa de R$ 500”."
+        else:
+            candidates = db.scalars(
+                select(Transaction)
+                .where(
+                    Transaction.user_id == uid,
+                    Transaction.deleted_at.is_(None),
+                    Transaction.amount_cents == amount,
+                    Transaction.occurred_on >= today - timedelta(days=120),
+                )
+                .order_by(Transaction.occurred_on.desc())
+                .limit(5)
+            ).all()
+            if not candidates:
+                text = f"Não encontrei lançamentos de {brl(amount)} nos últimos 4 meses."
+            else:
+                for tx in candidates:
+                    kind = "receita" if tx.type == "income" else "despesa"
+                    summary = f"Excluir {kind} de {brl(tx.amount_cents)} — {tx.description} ({tx.occurred_on.strftime('%d/%m/%Y')})."
+                    action_ids.append(
+                        tools.create_action(
+                            db, user, conversation_id, "delete_transaction", {"id": tx.id}, summary
+                        ).id
+                    )
+                if len(candidates) == 1:
+                    tx = candidates[0]
+                    text = (
+                        f"Encontrei {('a receita' if tx.type == 'income' else 'a despesa')} de {brl(tx.amount_cents)} "
+                        f"do dia {tx.occurred_on.strftime('%d/%m')} ({tx.description}). Deseja realmente excluir? "
+                        "Confirme no botão abaixo."
+                    )
+                else:
+                    text = f"Encontrei {len(candidates)} lançamentos de {brl(amount)}. Qual deles você quer excluir? Escolha abaixo."
+            data = {"amount_cents": amount}
+
+    elif intent == "month_spend":
+        spent = ledger.totals_by_type(db, uid, month_start(today), today)["expense"]
+        tl = fc.timeline(db, uid, today, month_end(today))
+        planned = sum(e.amount_cents for e in tl["events"] if e.flow == "out")
+        estimate = True
+        text = (
+            f"Neste mês você já gastou {brl(spent)}. Até o fim do mês ainda estão previstos {brl(planned)} em "
+            f"saídas (contas, faturas, parcelas e recorrências cadastradas). Total estimado: {brl(spent + planned)}. "
+            "Gastos do dia a dia que não estão cadastrados não entram nessa conta."
+        )
+        data = {"spent_cents": spent, "planned_cents": planned}
+
+    elif intent == "why_more":
+        cmp = tools.compare_with_last_month(db, uid, today)
+        grew = [r for r in cmp["_raw"] if r["diff"] > 0][:3]
+        if not grew:
+            text = (
+                f"Este mês (até hoje) você gastou {cmp['this_month_total']}, contra {cmp['last_month_same_period_total']} "
+                "no mesmo período do mês passado — não houve aumento por categoria."
+            )
+        else:
+            lines = "\n".join(
+                f"• {r['category']}: {brl(r['this_month'])} (antes {brl(r['last_month'])}, +{brl(r['diff'])})"
+                for r in grew
+            )
+            text = (
+                f"Comparando com o mesmo período do mês passado ({cmp['last_month_same_period_total']} → "
+                f"{cmp['this_month_total']}), o que mais aumentou foi:\n{lines}"
+            )
+        data = {"categories": grew}
+
+    elif intent == "to_receive":
+        tl = fc.timeline(db, uid, today, today + timedelta(days=30))
+        ins = [e for e in tl["events"] if e.flow == "in"]
+        if not ins:
+            text = "Não há receitas previstas para os próximos 30 dias. Cadastre seu salário em Futuros para eu acompanhar."
+        else:
+            text = (
+                f"Nos próximos 30 dias você deve receber {brl(sum(e.amount_cents for e in ins))}:\n"
+                + "\n".join(
+                    f"• {e.date.strftime('%d/%m')} — {e.description}: {brl(e.amount_cents)}" for e in ins[:8]
+                )
+            )
+        data = {"total_cents": sum(e.amount_cents for e in ins)}
+
+    elif intent == "debts":
+        rows = [
+            (d, s)
+            for d, s in debts_svc.statuses(db, uid, today)
+            if d.status == "active" and s.remaining_installments
+        ]
+        if not rows:
+            text = "Você não tem dívidas cadastradas em aberto."
+        else:
+            total = sum(s.remaining_cents for _, s in rows)
+            text = f"Você deve, no total, {brl(total)}:\n" + "\n".join(
+                f"• {d.name}: {brl(s.remaining_cents)} em {s.remaining_installments} parcela(s); próxima em "
+                f"{s.next_due.strftime('%d/%m/%Y')}" + (" (atrasada)" if s.situation == "atrasada" else "")
+                for d, s in rows
+            )
+        data = {"total_cents": sum(s.remaining_cents for _, s in rows)}
+
     elif intent == "advice":
         facts = _facts(db, uid, today)
-        provider = get_provider()
+        provider = get_provider_for(user)
         text = None
         if provider is not None:
             try:
@@ -404,4 +523,11 @@ def answer(db: Session, user: User, question: str, today: date | None = None) ->
     else:
         text = HELP
 
-    return {"answer": text, "intent": intent, "engine": engine, "is_estimate": estimate, "data": data}
+    return {
+        "answer": text,
+        "intent": intent,
+        "engine": engine,
+        "is_estimate": estimate,
+        "data": data,
+        "action_ids": action_ids,
+    }

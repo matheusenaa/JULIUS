@@ -1,6 +1,6 @@
 """Dashboard, relatórios e histórico de alterações."""
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Query
@@ -10,6 +10,8 @@ from app.api.deps import DB, CurrentUser
 from app.models import AuditLog
 from app.schemas import AuditOut, TransactionOut
 from app.services import analytics
+from app.services import forecast as fc
+from app.services import overview as overview_svc
 from app.services.dates import local_today
 
 router = APIRouter(prefix="/api", tags=["visão geral"])
@@ -20,6 +22,26 @@ def dashboard(user: CurrentUser, db: DB):
     data = analytics.dashboard(db, user.id, local_today())
     data["recent"] = [TransactionOut.model_validate(t) for t in data["recent"]]
     return data
+
+
+@router.get("/overview")
+def overview(
+    user: CurrentUser,
+    db: DB,
+    days: int = Query(default=30, ge=7, le=180),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+):
+    """Visão geral: KPIs, linha do tempo, projeção, histórico, calendário, dívidas…"""
+    cal = date.fromisoformat(f"{month}-01") if month else None
+    return overview_svc.build(db, user.id, local_today(), days, cal)
+
+
+@router.get("/timeline")
+def timeline(user: CurrentUser, db: DB, days: int = Query(default=60, ge=1, le=366)):
+    """Lançamentos futuros e compromissos, com o saldo projetado depois de cada um."""
+    today = local_today()
+    tl = fc.timeline(db, user.id, today, today + timedelta(days=days))
+    return {**tl, "events": [e.as_dict() for e in tl["events"]]}
 
 
 @router.get("/reports")

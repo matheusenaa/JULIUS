@@ -39,6 +39,14 @@ def run_migrations_online() -> None:
 
 
 def _run(connection) -> None:
+    sqlite = connection.dialect.name == "sqlite"
+    if sqlite:
+        # O modo batch do SQLite recria tabelas; com FKs ativas ele não consegue
+        # recriar tabelas referenciadas. Desliga durante a migration e verifica no fim.
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        # Fecha a transação implícita aberta pelo PRAGMA; senão o Alembic entende que
+        # há uma transação externa e não confirma a migration.
+        connection.commit()
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -48,6 +56,13 @@ def _run(connection) -> None:
     )
     with context.begin_transaction():
         context.run_migrations()
+        if sqlite:
+            broken = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                raise RuntimeError(f"Migration deixaria chaves estrangeiras inválidas: {broken[:5]}")
+    if sqlite:
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        connection.commit()
 
 
 if context.is_offline_mode():

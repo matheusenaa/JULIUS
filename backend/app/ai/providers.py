@@ -7,6 +7,7 @@ delegado a ela. Qualquer falha vira AIUnavailable e o sistema segue sem IA.
 import base64
 import json
 import logging
+from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
@@ -14,6 +15,7 @@ import httpx
 from app.config import Settings, get_settings
 
 log = logging.getLogger("julius.ai")
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
 class AIUnavailable(Exception):
@@ -60,7 +62,7 @@ class GeminiProvider:
             "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.1},
         }
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        url = f"{GEMINI_BASE}/models/{self.model}:generateContent"
         try:
             r = httpx.post(url, json=body, headers={"x-goog-api-key": self.key}, timeout=self.timeout)
             r.raise_for_status()
@@ -69,6 +71,12 @@ class GeminiProvider:
             log.warning("Gemini indisponível: %s", type(exc).__name__)
             raise AIUnavailable(str(type(exc).__name__)) from exc
         return _parse_json(text)
+
+    def chat(self, messages: list[dict], tools: list[dict]) -> "ChatReply":
+        # Endpoint do Gemini compatível com OpenAI (suporta function calling)
+        return _openai_chat(
+            f"{GEMINI_BASE}/openai/chat/completions", self.key, self.model, self.timeout, messages, tools
+        )
 
 
 class OpenAICompatibleProvider:
@@ -113,6 +121,11 @@ class OpenAICompatibleProvider:
             raise AIUnavailable(str(type(exc).__name__)) from exc
         return _parse_json(text)
 
+    def chat(self, messages: list[dict], tools: list[dict]) -> "ChatReply":
+        return _openai_chat(
+            f"{self.base}/chat/completions", self.key, self.model, self.timeout, messages, tools
+        )
+
 
 _provider_override: AIProvider | None = None
 
@@ -120,6 +133,45 @@ _provider_override: AIProvider | None = None
 def set_provider_for_tests(provider: AIProvider | None) -> None:
     global _provider_override
     _provider_override = provider
+
+
+@dataclass
+class ChatReply:
+    text: str | None
+    tool_calls: list[dict]  # [{"id", "name", "arguments": dict}]
+    raw_message: dict
+
+
+def _openai_chat(
+    url: str, key: str, model: str, timeout: float, messages: list[dict], tools: list[dict]
+) -> ChatReply:
+    body = {"model": model, "temperature": 0.2, "messages": messages}
+    if tools:
+        body["tools"] = [{"type": "function", "function": t} for t in tools]
+    try:
+        r = httpx.post(url, json=body, headers={"Authorization": f"Bearer {key}"}, timeout=timeout)
+        r.raise_for_status()
+        msg = r.json()["choices"][0]["message"]
+    except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
+        log.warning("Chat com ferramentas indisponível: %s", type(exc).__name__)
+        raise AIUnavailable(type(exc).__name__) from exc
+    calls = []
+    for c in msg.get("tool_calls") or []:
+        try:
+            args = json.loads(c["function"].get("arguments") or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        calls.append(
+            {"id": c.get("id") or c["function"]["name"], "name": c["function"]["name"], "arguments": args}
+        )
+    return ChatReply(text=msg.get("content"), tool_calls=calls, raw_message=msg)
+
+
+def get_provider_for(user) -> AIProvider | None:
+    """Provedor respeitando a preferência do usuário (IA pode ser desligada em Ajustes)."""
+    if (getattr(user, "settings", None) or {}).get("ai_enabled") is False:
+        return None
+    return get_provider()
 
 
 def get_provider() -> AIProvider | None:

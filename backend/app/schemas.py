@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 AccountKind = Literal["checking", "savings", "cash", "wallet", "credit_card", "investment", "other"]
 TxType = Literal["income", "expense", "transfer"]
-TxStatus = Literal["paid", "pending"]
+TxStatus = Literal["pending", "confirmed", "paid", "canceled"]
 PaymentMethod = Literal["pix", "debit", "credit", "cash", "boleto", "transfer", "other"]
 TxSource = Literal["manual", "quick_input", "ai", "ocr", "import", "recurrence"]
 Frequency = Literal["weekly", "monthly", "yearly"]
@@ -43,9 +43,18 @@ class PasswordChangeIn(_In):
 
 
 class SettingsIn(_In):
+    """Preferências do usuário (todas opcionais; só o que vier é alterado)."""
+
     mode: Literal["basic", "advanced"] | None = None
     default_account_id: str | None = None
     name: str | None = Field(default=None, min_length=1, max_length=80)
+    currency: Literal["BRL", "USD", "EUR"] | None = None
+    ai_enabled: bool | None = None
+    # Privacidade: se False, a IA recebe categoria e valor, mas não a descrição dos lançamentos
+    ai_share_descriptions: bool | None = None
+    ai_custom_instructions: str | None = Field(default=None, max_length=4000)
+    notify_due: bool | None = None
+    onboarded: bool | None = None
 
 
 class UserOut(_Out):
@@ -198,6 +207,8 @@ class TransactionOut(_Out):
     installment_plan_id: str | None
     installment_number: int | None
     installment_total: int | None = None
+    debt_id: str | None = None
+    debt_installment: int | None = None
     version: int
     created_at: datetime
     updated_at: datetime
@@ -347,3 +358,49 @@ class AuditOut(_Out):
     summary: str
     changes: dict | None
     created_at: datetime
+
+
+# ---------- Dívidas ----------
+DebtKind = Literal["loan", "financing", "purchase", "card", "informal", "other"]
+
+
+class DebtIn(_In):
+    name: str = Field(min_length=1, max_length=80)
+    creditor: str | None = Field(default=None, max_length=80)
+    kind: DebtKind = "other"
+    original_cents: int = Cents
+    installments_total: int = Field(ge=1, le=600)
+    installment_cents: int = Cents
+    installments_paid_before: int = Field(default=0, ge=0, le=600)
+    first_due_date: date
+    interest_monthly_bp: int | None = Field(default=None, ge=0, le=100000)
+    account_id: str | None = None
+    category_id: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _paid(self):
+        if self.installments_paid_before > self.installments_total:
+            raise ValueError("Parcelas já pagas não podem passar do total de parcelas.")
+        return self
+
+
+class DebtUpdate(_In):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    creditor: str | None = Field(default=None, max_length=80)
+    kind: DebtKind | None = None
+    installment_cents: int | None = Field(default=None, gt=0, le=MAX_CENTS)
+    installments_total: int | None = Field(default=None, ge=1, le=600)
+    installments_paid_before: int | None = Field(default=None, ge=0, le=600)
+    first_due_date: date | None = None
+    interest_monthly_bp: int | None = Field(default=None, ge=0, le=100000)
+    account_id: str | None = None
+    category_id: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    status: Literal["active", "canceled"] | None = None
+
+
+class DebtPayIn(_In):
+    amount_cents: int | None = Field(default=None, gt=0, le=MAX_CENTS)
+    occurred_on: date | None = None
+    account_id: str | None = None

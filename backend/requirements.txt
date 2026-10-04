@@ -11,3 +11,6 @@ python-multipart>=0.0.9
 python-dateutil>=2.9
 psycopg[binary]>=3.2,<4
 tzdata>=2024.1  # fusos hor�rios no Windows
+pypdf>=5  # texto de PDFs (boletos/faturas) sem IA
+openpyxl>=3.1  # exportação Excel
+fpdf2>=2.8  # relatório em PDF

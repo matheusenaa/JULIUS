@@ -17,18 +17,23 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, IdMixin, SoftDeleteMixin, TimestampMixin, str_enum
+from app.models.base import Base, IdMixin, SoftDeleteMixin, SyncMixin, TimestampMixin, str_enum
 
 ACCOUNT_KINDS = ("checking", "savings", "cash", "wallet", "credit_card", "investment", "other")
 CATEGORY_KINDS = ("expense", "income")
 TX_TYPES = ("income", "expense", "transfer")
-TX_STATUSES = ("paid", "pending")  # realizada | prevista
+# previsto | confirmado (ex.: boleto agendado) | pago/recebido | cancelado.
+# "Atrasado" não é gravado: é previsto/confirmado com data já passada (calculado na hora).
+TX_STATUSES = ("pending", "confirmed", "paid", "canceled")
+OPEN_STATUSES = ("pending", "confirmed")
 PAYMENT_METHODS = ("pix", "debit", "credit", "cash", "boleto", "transfer", "other")
 TX_SOURCES = ("manual", "quick_input", "ai", "ocr", "import", "recurrence")
 FREQUENCIES = ("weekly", "monthly", "yearly")
+DEBT_KINDS = ("loan", "financing", "purchase", "card", "informal", "other")
+DEBT_STATUSES = ("active", "canceled")
 
 
-class Account(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
+class Account(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
     """Conta bancária, carteira, dinheiro ou cartão de crédito."""
 
     __tablename__ = "accounts"
@@ -55,7 +60,7 @@ class Account(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
     due_day: Mapped[int | None] = mapped_column(SmallInteger)
 
 
-class Category(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
+class Category(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
     """Categoria (parent_id nulo) ou subcategoria (parent_id preenchido)."""
 
     __tablename__ = "categories"
@@ -69,7 +74,7 @@ class Category(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
     color: Mapped[str | None] = mapped_column(String(9))
 
 
-class Recurrence(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
+class Recurrence(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
     """Regra de lançamento recorrente (aluguel, salário, assinatura...)."""
 
     __tablename__ = "recurrences"
@@ -94,7 +99,7 @@ class Recurrence(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
     end_date: Mapped[date | None] = mapped_column(Date)
 
 
-class InstallmentPlan(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
+class InstallmentPlan(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
     """Compra parcelada. As parcelas em si são transações ligadas a este plano."""
 
     __tablename__ = "installment_plans"
@@ -111,7 +116,43 @@ class InstallmentPlan(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
     purchase_date: Mapped[date] = mapped_column(Date)
 
 
-class Transaction(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
+class Debt(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
+    """Dívida, empréstimo ou financiamento.
+
+    Restante, próxima parcela e data final são CALCULADOS a partir das parcelas
+    já pagas antes do cadastro + pagamentos registrados (transações com debt_id).
+    """
+
+    __tablename__ = "debts"
+    __table_args__ = (
+        CheckConstraint("installments_total BETWEEN 1 AND 600", name="installments_range"),
+        CheckConstraint("installment_cents > 0", name="installment_positive"),
+        CheckConstraint("original_cents > 0", name="original_positive"),
+        CheckConstraint(
+            "installments_paid_before >= 0 AND installments_paid_before <= installments_total",
+            name="paid_before_range",
+        ),
+        CheckConstraint("interest_monthly_bp IS NULL OR interest_monthly_bp >= 0", name="interest"),
+    )
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    creditor: Mapped[str | None] = mapped_column(String(80))
+    kind: Mapped[str] = mapped_column(str_enum(DEBT_KINDS, "debt_kind"), default="other")
+    status: Mapped[str] = mapped_column(str_enum(DEBT_STATUSES, "debt_status"), default="active")
+    original_cents: Mapped[int] = mapped_column(BigInteger)
+    installments_total: Mapped[int] = mapped_column(SmallInteger)
+    installment_cents: Mapped[int] = mapped_column(BigInteger)
+    installments_paid_before: Mapped[int] = mapped_column(SmallInteger, default=0)
+    first_due_date: Mapped[date] = mapped_column(Date)
+    # Juros mensais em pontos-base (1,99% = 199). Apenas informativo.
+    interest_monthly_bp: Mapped[int | None] = mapped_column(Integer)
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"))
+    category_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class Transaction(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
     """Toda movimentação financeira: receita, despesa ou transferência."""
 
     __tablename__ = "transactions"
@@ -126,14 +167,21 @@ class Transaction(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
             "(installment_plan_id IS NULL) = (installment_number IS NULL)", name="installment_pair"
         ),
         CheckConstraint("(recurrence_id IS NULL) = (occurrence_date IS NULL)", name="recurrence_pair"),
+        CheckConstraint("(debt_id IS NULL) = (debt_installment IS NULL)", name="debt_pair"),
         CheckConstraint("version >= 1", name="version"),
-        # Impede lançar duas vezes a mesma ocorrência de uma recorrência
+        # Impede lançar duas vezes a mesma ocorrência de uma recorrência / parcela
         UniqueConstraint("recurrence_id", "occurrence_date", name="uq_transactions_occurrence"),
         UniqueConstraint("installment_plan_id", "installment_number", name="uq_transactions_installment"),
+        UniqueConstraint("debt_id", "debt_installment", name="uq_transactions_debt_installment"),
+        # Extrato importado duas vezes não duplica lançamentos
+        UniqueConstraint("user_id", "import_ref", name="uq_transactions_import_ref"),
         Index("ix_transactions_user_date", "user_id", "occurred_on"),
         Index("ix_transactions_user_category", "user_id", "category_id"),
+        Index("ix_transactions_user_status", "user_id", "status"),
+        Index("ix_transactions_user_updated", "user_id", "updated_at"),
         Index("ix_transactions_account", "account_id"),
         Index("ix_transactions_to_account", "to_account_id"),
+        Index("ix_transactions_debt", "debt_id"),
     )
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
@@ -157,11 +205,12 @@ class Transaction(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
         ForeignKey("installment_plans.id", ondelete="CASCADE")
     )
     installment_number: Mapped[int | None] = mapped_column(SmallInteger)
-    # Controle otimista de concorrência (sincronização offline)
-    version: Mapped[int] = mapped_column(Integer, default=1)
+    debt_id: Mapped[str | None] = mapped_column(ForeignKey("debts.id", ondelete="SET NULL"))
+    debt_installment: Mapped[int | None] = mapped_column(SmallInteger)
+    import_ref: Mapped[str | None] = mapped_column(String(64))
 
 
-class Budget(IdMixin, TimestampMixin, Base):
+class Budget(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
     """Limite mensal de gasto para uma categoria."""
 
     __tablename__ = "budgets"
@@ -175,7 +224,7 @@ class Budget(IdMixin, TimestampMixin, Base):
     amount_cents: Mapped[int] = mapped_column(BigInteger)
 
 
-class Goal(IdMixin, TimestampMixin, SoftDeleteMixin, Base):
+class Goal(IdMixin, TimestampMixin, SoftDeleteMixin, SyncMixin, Base):
     """Meta financeira. Se ligada a uma conta, o progresso é o saldo dessa conta."""
 
     __tablename__ = "goals"

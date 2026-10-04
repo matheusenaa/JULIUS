@@ -2,15 +2,33 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.errors import AppError, Conflict
-from app.models import Account, User, UserSession
+from app.models import (
+    Account,
+    AIAction,
+    AIConversation,
+    Attachment,
+    AuditLog,
+    Budget,
+    CategorizationRule,
+    Category,
+    Debt,
+    Goal,
+    InstallmentPlan,
+    Recurrence,
+    SyncConflict,
+    SyncState,
+    Transaction,
+    User,
+    UserSession,
+)
 from app.models.base import utcnow
 from app.security.passwords import hash_password, needs_rehash, verify_password
-from app.services import audit
+from app.services import audit, storage
 from app.services.default_categories import create_default_categories
 
 RENEW_AFTER = timedelta(days=1)
@@ -105,4 +123,35 @@ def change_password(db: Session, user: User, current: str, new: str, keep_token:
         )
     )
     audit.record(db, user.id, "user", user.id, "update", "Senha alterada.")
+    db.commit()
+
+
+def delete_account(db: Session, user: User, password: str) -> None:
+    """Exclusão definitiva de todos os dados do usuário, em ordem segura de dependências."""
+    if not verify_password(user.password_hash, password):
+        raise AppError(400, "wrong_password", "Senha incorreta. Nada foi excluído.")
+    uid = user.id
+    for att in db.scalars(select(Attachment).where(Attachment.user_id == uid)):
+        storage.delete(att)  # arquivos fora do banco (modo local)
+    db.execute(update(Category).where(Category.user_id == uid).values(parent_id=None))
+    for model in (
+        Transaction,
+        AIAction,
+        AIConversation,
+        Attachment,
+        Debt,
+        Recurrence,
+        InstallmentPlan,
+        Budget,
+        Goal,
+        CategorizationRule,
+        Category,
+        Account,
+        SyncConflict,
+        SyncState,
+        AuditLog,
+        UserSession,
+    ):
+        db.execute(delete(model).where(model.user_id == uid))
+    db.execute(delete(User).where(User.id == uid))
     db.commit()

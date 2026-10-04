@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai import nlp_pt
-from app.ai.providers import AIUnavailable, get_provider
+from app.ai.providers import AIUnavailable, get_provider_for
 from app.models import Account, Category, User
 from app.services import categorizer
 from app.services.categorizer import normalize
@@ -92,8 +92,8 @@ def _default_account(user: User, accounts, payment: str | None) -> Account | Non
     return (non_cards or accounts or [None])[0]
 
 
-def _ask_ai(text: str, today: date, cats, accounts) -> dict | None:
-    provider = get_provider()
+def _ask_ai(user: User, text: str, today: date, cats, accounts) -> dict | None:
+    provider = get_provider_for(user)
     if provider is None:
         return None
     parents = {c.id: c.name for c in cats if c.parent_id is None}
@@ -145,7 +145,7 @@ def parse(db: Session, user: User, text: str, today: date | None = None) -> dict
 
     ai = None
     try:
-        ai = _ask_ai(text, today, cats, accounts)
+        ai = _ask_ai(user, text, today, cats, accounts)
     except AIUnavailable:
         ai_error = True
     if ai:

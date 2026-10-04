@@ -9,83 +9,35 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Account, Budget, Category, Goal, Transaction
+from app.models import Budget, Category, Goal, Transaction
+from app.services import forecast as fc
 from app.services import ledger
 from app.services.dates import add_months, local_today, month_end, month_start, period_bounds, previous_period
-from app.services.recurrences import pending_occurrences
+from app.services.money import brl
 
 UNCATEGORIZED = "Sem categoria"
 
 
-def _cash_accounts(db: Session, user_id: str) -> dict[str, Account]:
-    """Contas que compõem o "dinheiro disponível" (exclui cartões e contas fora do total)."""
-    return {
-        a.id: a
-        for a in db.scalars(
-            select(Account).where(
-                Account.user_id == user_id,
-                Account.deleted_at.is_(None),
-                Account.kind != "credit_card",
-                Account.include_in_total.is_(True),
-            )
-        )
-    }
-
-
-def _cards(db: Session, user_id: str) -> list[Account]:
-    return list(
-        db.scalars(
-            select(Account).where(
-                Account.user_id == user_id,
-                Account.deleted_at.is_(None),
-                Account.kind == "credit_card",
-            )
-        )
-    )
+_cards = ledger.cards
 
 
 def current_balance(db: Session, user_id: str, today: date) -> int:
-    balances = ledger.account_balances(db, user_id, as_of=today)
-    return sum(balances.get(a, 0) for a in _cash_accounts(db, user_id))
+    return ledger.cash_balance(db, user_id, today)
 
 
 def projected_balance(db: Session, user_id: str, today: date, until: date) -> dict:
-    """Saldo estimado em `until`: saldo atual + previstos + recorrências − faturas a vencer."""
-    cash = _cash_accounts(db, user_id)
-    cards = {c.id for c in _cards(db, user_id)}
-    balance = current_balance(db, user_id, today)
-
-    pending_effect = 0
-    # Lançamentos previstos (inclui atrasados) e realizados com data futura
-    rows = db.scalars(
-        select(Transaction).where(
-            Transaction.user_id == user_id,
-            Transaction.deleted_at.is_(None),
-            Transaction.occurred_on <= until,
-            (Transaction.status == "pending") | (Transaction.occurred_on > today),
-        )
-    )
-    for tx in rows:
-        if tx.type == "transfer" and tx.to_account_id in cards:
-            continue  # pagamento de fatura já é coberto pelo valor das faturas abaixo
-        if tx.account_id in cash:
-            pending_effect += tx.amount_cents if tx.type == "income" else -tx.amount_cents
-        if tx.type == "transfer" and tx.to_account_id in cash:
-            pending_effect += tx.amount_cents
-
-    recurring_effect = 0
-    for occ in pending_occurrences(db, user_id, today - timedelta(days=62), until):
-        if occ.recurrence.account_id in cash:
-            sign = 1 if occ.recurrence.type == "income" else -1
-            recurring_effect += sign * occ.recurrence.amount_cents
-
-    invoices_due = sum(ledger.card_amount_due_by(db, c, until) for c in _cards(db, user_id))
+    """Saldo estimado em `until`, a partir da linha do tempo (fonte única)."""
+    tl = fc.timeline(db, user_id, today, until)
+    by_kind: dict[str, int] = defaultdict(int)
+    for e in tl["events"]:
+        by_kind[e.kind] += e.signed
     return {
-        "current_cents": balance,
-        "pending_cents": pending_effect,
-        "recurring_cents": recurring_effect,
-        "card_invoices_cents": invoices_due,
-        "projected_cents": balance + pending_effect + recurring_effect - invoices_due,
+        "current_cents": tl["start_balance_cents"],
+        "pending_cents": by_kind["transaction"],
+        "recurring_cents": by_kind["recurrence"],
+        "card_invoices_cents": -by_kind["invoice"],
+        "debts_cents": -by_kind["debt"],
+        "projected_cents": tl["end_balance_cents"],
         "until": until,
     }
 
@@ -148,60 +100,24 @@ def fixed_variable(db: Session, user_id: str, start: date, end: date) -> dict:
 
 
 def upcoming(db: Session, user_id: str, today: date, days: int = 15) -> list[dict]:
-    until = today + timedelta(days=days)
-    items: list[dict] = []
-    for tx in db.scalars(
-        select(Transaction)
-        .where(
-            Transaction.user_id == user_id,
-            Transaction.deleted_at.is_(None),
-            Transaction.status == "pending",
-            Transaction.occurred_on <= until,
-        )
-        .order_by(Transaction.occurred_on)
-    ):
+    """Próximos compromissos (e atrasados), vindos da linha do tempo."""
+    items = []
+    for e in fc.events(db, user_id, today, today + timedelta(days=days)):
+        if e.status == "scheduled":
+            continue  # já realizado com data futura: não é algo "a pagar"
         items.append(
             {
-                "kind": "pending",
-                "id": tx.id,
-                "date": tx.occurred_on,
-                "type": tx.type,
-                "description": tx.description,
-                "amount_cents": tx.amount_cents,
-                "overdue": tx.occurred_on < today,
+                "kind": e.kind,
+                "id": e.ref_id,
+                "date": e.date,
+                "type": "income" if e.flow == "in" else "expense",
+                "description": e.description,
+                "amount_cents": e.amount_cents,
+                "overdue": e.status == "overdue",
+                "status": e.status,
+                "extra": e.extra,
             }
         )
-    for occ in pending_occurrences(db, user_id, today - timedelta(days=62), until):
-        r = occ.recurrence
-        items.append(
-            {
-                "kind": "recurrence",
-                "id": r.id,
-                "date": occ.date,
-                "type": r.type,
-                "description": r.description,
-                "amount_cents": r.amount_cents,
-                "overdue": occ.date < today,
-            }
-        )
-    for card in _cards(db, user_id):
-        for inv in ledger.card_invoices(db, card):
-            if (
-                inv["remaining_cents"] > 0
-                and inv["due_date"] <= until
-                and inv["due_date"] >= today - timedelta(days=62)
-            ):
-                items.append(
-                    {
-                        "kind": "invoice",
-                        "id": card.id,
-                        "date": inv["due_date"],
-                        "type": "expense",
-                        "description": f"Fatura {card.name}",
-                        "amount_cents": inv["remaining_cents"],
-                        "overdue": inv["due_date"] < today,
-                    }
-                )
     return sorted(items, key=lambda i: i["date"])
 
 
@@ -216,7 +132,7 @@ def budgets_status(db: Session, user_id: str, today: date) -> list[dict]:
         for row in expenses_by_category(db, user_id, start, end, rollup=False)
     }
     result = []
-    for b in db.scalars(select(Budget).where(Budget.user_id == user_id)):
+    for b in db.scalars(select(Budget).where(Budget.user_id == user_id, Budget.deleted_at.is_(None))):
         cat = db.get(Category, b.category_id)
         if cat is None or cat.deleted_at is not None:
             continue
@@ -429,12 +345,51 @@ def insights(db: Session, user_id: str, today: date) -> list[dict]:
                     }
                 )
 
-    overdue = [u for u in upcoming(db, user_id, today, 0) if u["overdue"]]
+    # Mesmo mês até hoje × mesmo período do mês passado (ex.: "lazer aumentou 32%")
+    prev_start = add_months(start, -1)
+    prev_end = min(month_end(prev_start), prev_start.replace(day=1) + (today - start))
+    previous = {
+        c["category_id"]: c["total_cents"] for c in expenses_by_category(db, user_id, prev_start, prev_end)
+    }
+    for cid, c in current.items():
+        before = previous.get(cid, 0)
+        if before >= 5000 and c["total_cents"] >= before * 1.2 and c["total_cents"] - before >= 5000:
+            pct = round((c["total_cents"] / before - 1) * 100)
+            text = f"Seu gasto com {c['name'].lower()} aumentou {pct}% em relação ao mesmo período do mês passado."
+            if not any(c["name"] in o["text"] for o in out):
+                out.append({"level": "info", "text": text})
+
+    # Compromissos: atrasados, hoje, amanhã, próximos 7 dias e saldo negativo projetado
+    week = fc.timeline(db, user_id, today, today + timedelta(days=7))
+    open_events = [e for e in week["events"] if e.status != "scheduled"]
+    overdue = [e for e in open_events if e.status == "overdue"]
     if overdue:
         out.append(
             {
                 "level": "warning",
-                "text": f"{len(overdue)} conta(s) prevista(s) com data vencida aguardando confirmação.",
+                "text": f"{len(overdue)} compromisso(s) com data vencida aguardando confirmação.",
+            }
+        )
+    for e in open_events:
+        if e.status == "overdue":
+            continue
+        verb = "entra" if e.flow == "in" else "vence"
+        if e.date == today:
+            out.append({"level": "warning", "text": f"{e.description}: {verb} hoje ({brl(e.amount_cents)})."})
+        elif e.date == today + timedelta(days=1):
+            out.append({"level": "info", "text": f"{e.description}: {verb} amanhã ({brl(e.amount_cents)})."})
+    to_pay = sum(e.amount_cents for e in open_events if e.flow == "out")
+    if to_pay:
+        out.append(
+            {"level": "info", "text": f"Você tem {brl(to_pay)} em contas previstas para os próximos 7 dias."}
+        )
+    month_tl = fc.timeline(db, user_id, today, today + timedelta(days=30))
+    if month_tl["lowest"]["balance_cents"] < 0 <= month_tl["start_balance_cents"]:
+        when = month_tl["lowest"]["date"].strftime("%d/%m")
+        out.append(
+            {
+                "level": "danger",
+                "text": f"Pela projeção, seu saldo fica negativo em {when} ({brl(month_tl['lowest']['balance_cents'])}).",
             }
         )
 
