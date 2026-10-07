@@ -6,12 +6,25 @@ $root = Split-Path $PSScriptRoot -Parent
 $venv = Join-Path $env:USERPROFILE ".venvs\julius"
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "Instale o Python 3.12+ (python.org)." }
+$pyver = python -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')"
+if ([version]$pyver -lt [version]'3.12') { throw "Python $pyver encontrado; requerido >= 3.12." }
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "Instale o Node.js LTS (nodejs.org) e reabra o terminal." }
+$nodever = node --version
+Write-Host "Python $pyver / Node $nodever"
 
 if (-not (Test-Path "$venv\Scripts\python.exe")) { python -m venv $venv }
 & "$venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r "$root\backend\requirements-dev.txt"
 
-if (-not (Test-Path "$root\backend\.env")) { Copy-Item "$root\backend\.env.example" "$root\backend\.env" }
+if (-not (Test-Path "$root\backend\.env")) {
+    Copy-Item "$root\backend\.env.example" "$root\backend\.env"
+    # Gera uma SECRET_KEY real: .env.example vem vazia e em produção ela é obrigatória.
+    $bytes = New-Object byte[] 48
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    $secret = [Convert]::ToBase64String($bytes)
+    $envContent = Get-Content "$root\backend\.env" -Raw
+    $envContent = $envContent -replace '(?m)^SECRET_KEY=.*$', "SECRET_KEY=$secret"
+    Set-Content -Path "$root\backend\.env" -Value $envContent -NoNewline -Encoding utf8
+}
 
 Push-Location "$root\backend"; & "$venv\Scripts\alembic.exe" upgrade head; Pop-Location
 Push-Location "$root\frontend"; npm install --no-fund --no-audit; Pop-Location

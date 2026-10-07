@@ -71,9 +71,17 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", tags=["infra"])
     def health():
+        from datetime import datetime, timezone
+
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-        return {"status": "ok", "ai_provider": settings.ai_provider}
+        return {
+            "status": "ok",
+            "app_env": settings.app_env,
+            "ai_provider": settings.ai_provider,
+            "timezone": settings.timezone,
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
 
     _mount_frontend(app)
     return app

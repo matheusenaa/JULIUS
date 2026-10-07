@@ -65,6 +65,22 @@ class Settings(BaseSettings):
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_env_falls_back_to_default(cls, data: object) -> object:
+        """`VAR=` (vazio) no .env é tratado como "não definido".
+
+        Sem isso, `SECRET_KEY=` ou `DATABASE_URL=` vazio quebrava a inicialização
+        em instalação nova, porque o valor vazio vence o padrão da classe.
+        """
+        if isinstance(data, dict):
+            return {
+                key: value
+                for key, value in data.items()
+                if not (isinstance(value, str) and value.strip() == "")
+            }
+        return data
+
     @model_validator(mode="after")
     def _check_production(self) -> "Settings":
         if self.is_production and self.secret_key.startswith("dev-insecure"):

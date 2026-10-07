@@ -276,7 +276,16 @@ def test_request_cache_never_returns_stale_balance(api):
     with SessionLocal() as db:
         assert db.get(User, user_id) is not None
         before = ledger.account_balances(db, user_id, as_of=TODAY)[acc["id"]]
-        tx_svc.create(db, user_id, TransactionIn(type="expense", account_id=acc["id"], amount_cents=2500,
-                                                 occurred_on=TODAY, description="cache"))
+        tx_svc.create(
+            db,
+            user_id,
+            TransactionIn(
+                type="expense",
+                account_id=acc["id"],
+                amount_cents=2500,
+                occurred_on=TODAY,
+                description="cache",
+            ),
+        )
         after = ledger.account_balances(db, user_id, as_of=TODAY)[acc["id"]]
     assert (before, after) == (10000, 7500)
