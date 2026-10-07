@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -71,7 +72,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", tags=["infra"])
     def health():
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
@@ -80,7 +81,7 @@ def create_app() -> FastAPI:
             "app_env": settings.app_env,
             "ai_provider": settings.ai_provider,
             "timezone": settings.timezone,
-            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         }
 
     _mount_frontend(app)

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Configuração lida de variáveis de ambiente / arquivo .env.
 
 Nenhum segredo tem valor padrão utilizável em produção: se APP_ENV=production
@@ -45,9 +46,18 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
-    ai_timeout_seconds: float = 20.0
+    ai_timeout_seconds: float = 30.0
     # Instruções do seu agente (ex.: texto de um Gem do Gemini): arquivo .md/.txt lido pelo backend
     ai_agent_instructions_file: str = ""
+
+    # Busca na web para o agente (opcional) - provedores gratuitos
+    web_search_enabled: bool = False
+    web_search_provider_order: str = "tavily,serper,brave,duckduckgo"
+    tavily_api_key: str = ""
+    serper_api_key: str = ""
+    brave_api_key: str = ""
+    google_search_api_key: str = ""
+    google_cse_id: str = ""
 
     max_upload_mb: int = 8
     # Onde guardar arquivos de documentos: "db" (no banco) ou "local" (pasta STORAGE_DIR)
