@@ -1,0 +1,1 @@
+import{lt as e}from"./ui-UB-kpTmP.js";var t={name:`arrow-down-left`,size:24,node:[[`path`,{d:`M17 7 7 17`,key:`15tmo1`}],[`path`,{d:`M17 17H7V7`,key:`1org7z`}]]};t.node;var n=e(t),r={name:`arrow-up-right`,size:24,node:[[`path`,{d:`M7 7h10v10`,key:`1tivn9`}],[`path`,{d:`M7 17 17 7`,key:`1vkiza`}]]};r.node;var i=e(r);export{n,i as t};
