@@ -61,6 +61,13 @@ const isOffline = (err: unknown) => err instanceof ApiError && err.offline;
 
 export type CreateResult = { queued: false; tx: Transaction } | { queued: true; id: string };
 
+/** createdAt estritamente crescente: Date.now() tem resolução de ms e itens
+ *  criados no mesmo milissegundo empatariam, perdendo a ordem da fila. */
+async function nextCreatedAt(): Promise<number> {
+  const last = await localDb.outbox.orderBy("createdAt").last();
+  return Math.max(Date.now(), (last?.createdAt ?? 0) + 1);
+}
+
 /** Cria um lançamento; sem conexão, guarda na fila e sincroniza depois. */
 export async function createTransaction(input: TransactionInput): Promise<CreateResult> {
   const body = { ...input, id: input.id ?? uuid() };
@@ -73,7 +80,7 @@ export async function createTransaction(input: TransactionInput): Promise<Create
   }
   await localDb.outbox.put({
     id: body.id, op: "create", entityId: body.id, body, label: body.description, amountCents: body.amount_cents,
-    createdAt: Date.now(), status: "pending", attempts: 0,
+    createdAt: await nextCreatedAt(), status: "pending", attempts: 0,
   });
   return { queued: true, id: body.id };
 }
@@ -98,7 +105,7 @@ export async function updateTransaction(
   }
   await localDb.outbox.put({
     id: uuid(), op: "update", entityId: tx.id, body: changes, baseVersion: tx.version, label: tx.description,
-    amountCents: (changes.amount_cents as number) ?? tx.amount_cents, createdAt: Date.now(), status: "pending", attempts: 0,
+    amountCents: (changes.amount_cents as number) ?? tx.amount_cents, createdAt: await nextCreatedAt(), status: "pending", attempts: 0,
   });
   return { queued: true };
 }
@@ -119,7 +126,7 @@ export async function deleteTransaction(tx: Pick<Transaction, "id" | "descriptio
   }
   await localDb.outbox.put({
     id: uuid(), op: "delete", entityId: tx.id, body: { scope }, label: tx.description, amountCents: tx.amount_cents,
-    createdAt: Date.now(), status: "pending", attempts: 0,
+    createdAt: await nextCreatedAt(), status: "pending", attempts: 0,
   });
   return { queued: true };
 }

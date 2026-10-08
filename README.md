@@ -40,6 +40,7 @@ Pré-requisitos: Python 3.12+ e Node.js 22+ (ambos gratuitos; não precisam de a
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # venv, dependências, banco, .env
 powershell -ExecutionPolicy Bypass -File scripts\start.ps1   # compila e abre http://127.0.0.1:8010
+powershell -ExecutionPolicy Bypass -File scripts\start-lan.ps1  # idem, mas acessível de outros aparelhos da rede
 ```
 
 > ⚠️ Não coloque o projeto (nem o ambiente Python) dentro do OneDrive/Dropbox: a sincronização corrompe o ambiente virtual e trava o banco SQLite. O `setup.ps1` cria o venv em `%USERPROFILE%\.venvs\julius`.
@@ -128,6 +129,24 @@ Perguntas comuns (saldo, gastos, vencimentos, dívidas…) são respondidas por 
 Observação: no plano grátis o Render “dorme” após 15 min sem uso; o primeiro acesso seguinte leva ~1 min. Alternativa sem custo e sem espera: rodar no próprio PC (`scripts\start.ps1`) e acessar pelo celular na mesma rede Wi-Fi.
 
 Ambientes: `development` (local), `staging` e `production` (mesmas proteções de produção) — escolha por `APP_ENV`.
+
+## Como configurar o JULIUS em outro computador
+
+Os dados pertencem à **conta do usuário**, não ao computador: mesma conta = mesmos dados em qualquer máquina.
+
+**Opção A — mesmo roteador/Wi-Fi (sem cadastro, sem custo, imediato)**
+
+1. No PC 1, rode `powershell -ExecutionPolicy Bypass -File scripts\start-lan.ps1` — ele mostra o endereço da rede, ex.: `http://172.30.2.17:8010`.
+2. No PC 2 (ou celular), abra esse endereço no navegador e faça login com a mesma conta.
+3. Se não aparecer nada, libere a porta 8010 no Firewall do Windows (pergunta “Permitir acesso” na primeira execução).
+
+**Opção B — pela internet (qualquer lugar, planos gratuitos)**
+
+1. Deploy no Render + PostgreSQL no Neon conforme a seção *Build e Deploy* acima.
+2. Em qualquer computador: `scripts\setup.ps1` + `scripts\start.ps1`, apontando `API_URL`/o app para o endereço publicado — ou simplesmente abra o endereço do Render no navegador (é um PWA instalável).
+3. Faça login com a mesma conta: o servidor carrega todos os dados (transações, dívidas, futuros, documentos, metas).
+
+**Primeira execução em PC novo:** sem banco local prévio — o login baixa tudo do servidor e monta o ambiente local; as alterações offline entram na fila e sincronizam ao reconectar. O logout apenas encerra a sessão; nada é apagado.
 
 ## Segurança
 
